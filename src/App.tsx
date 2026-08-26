@@ -24,6 +24,10 @@ import { TeamScreen } from '@/routes/TeamScreen'
 import { ChatScreen } from '@/routes/ChatScreen'
 import { SparringScreen } from '@/routes/SparringScreen'
 import { SettingsScreen } from '@/routes/SettingsScreen'
+import { AdminScreen } from '@/routes/admin/AdminScreen'
+import { AdminCourtsScreen } from '@/routes/admin/AdminCourtsScreen'
+import { AdminPricingScreen } from '@/routes/admin/AdminPricingScreen'
+import { AdminClubScreen } from '@/routes/admin/AdminClubScreen'
 
 /** Rute tingkat atas — hanya di sini bottom nav muncul. */
 function TabLayout() {
@@ -33,6 +37,18 @@ function TabLayout() {
       <BottomNav />
     </>
   )
+}
+
+/**
+ * Rute admin dijaga di klien supaya menu dan halamannya tidak muncul untuk
+ * anggota biasa. Penjaga sebenarnya tetap di server: tiap endpoint admin
+ * menolak yang bukan admin, karena penjaga di klien bisa dilewati.
+ */
+function RequireAdmin() {
+  const user = useAuthStore((s) => s.user)
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/profile" replace />
+  return <Outlet />
 }
 
 function RequireAuth() {
@@ -83,6 +99,14 @@ export function App() {
           <Route path="/chat/:id" element={<ChatScreen />} />
           <Route path="/sparring" element={<SparringScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
+
+          {/* Dasbor admin klub */}
+          <Route element={<RequireAdmin />}>
+            <Route path="/admin" element={<AdminScreen />} />
+            <Route path="/admin/lapangan" element={<AdminCourtsScreen />} />
+            <Route path="/admin/tarif" element={<AdminPricingScreen />} />
+            <Route path="/admin/klub" element={<AdminClubScreen />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

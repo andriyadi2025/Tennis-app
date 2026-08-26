@@ -4,6 +4,7 @@ import {
   ChevronRight,
   CreditCard,
   Settings,
+  ShieldCheck,
   Sparkles,
   Swords,
   Trophy,
@@ -108,6 +109,23 @@ export function ProfileScreen() {
           100 poin = Rp10.000 potongan, bisa dipakai sampai 30% dari subtotal booking.
         </p>
       </section>
+
+      {/* Pintu masuk dasbor — hanya ada kalau akunnya memang admin klub. */}
+      {user.role === 'admin' && (
+        <Link
+          to="/admin"
+          className="flex min-h-touch items-center gap-3.5 rounded-lg bg-accent2-700 px-4 py-3.5 text-accent2-100"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-pill bg-accent2-600 text-bg">
+            <Icon icon={ShieldCheck} size={19} />
+          </span>
+          <span className="flex flex-1 flex-col">
+            <span className="font-heading text-md text-bg">Dasbor klub</span>
+            <span className="text-sm">Atur lapangan, tarif, dan jam buka.</span>
+          </span>
+          <Icon icon={ChevronRight} size={17} />
+        </Link>
+      )}
 
       <section className="flex flex-col gap-2.5">
         <h2 className="text-3xl">Akun</h2>
