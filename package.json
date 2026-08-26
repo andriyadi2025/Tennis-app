@@ -1,5 +1,5 @@
 {
-  "name": "lapangin",
+  "name": "dbtc",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -57,5 +57,6 @@
     "workerDirectory": [
       "public"
     ]
-  }
+  },
+  "description": "Dukuh Bima Tennis Club — app booking lapangan & komunitas"
 }

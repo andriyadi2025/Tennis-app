@@ -1,49 +1,61 @@
 /* ──────────────────────────────────────────────────────────────────────────
-   Lapangin — design tokens.
-   Ported from the Organic design system (claude.ai/design, project
-   "Booking Court Mobile App", _ds/organic-…/styles.css). This file is the ONLY
-   place a raw colour value may appear; everything downstream reads var(--*)
-   or the Tailwind names mapped from these in tailwind.config.ts.
+   Dukuh Bima Tennis Club — design tokens.
+
+   Struktur ramp-nya diwarisi dari design system Organic (claude.ai/design,
+   project "Booking Court Mobile App"): satu ground hangat, dua peran aksen,
+   dan skala netral yang dihangatkan. Nilainya sendiri diambil dari lambang
+   DBTC — disampel piksel demi piksel dari `logo dbtc.jpeg`, bukan dikira.
+
+     · ground krem   #f3e7d1   kertas di balik lambang
+     · emas          #c9a03c   cincin dalam, tipografi, bola tenis
+     · hijau hutan   #26503a   cincin luar, daun laurel, senar raket
+
+   Krem DBTC nyaris identik dengan ground Organic (#f5ead8), jadi perpindahan
+   merek hanya menukar dua peran aksen: terracotta → emas, sage → hijau.
+   Tidak ada komponen yang perlu disentuh karena semuanya membaca var(--*).
+
+   Berkas ini satu-satunya tempat nilai warna mentah boleh muncul.
    ────────────────────────────────────────────────────────────────────────── */
 :root {
-  --color-bg: #f5ead8;
-  --color-surface: #ebddc5;
-  --color-text: #201e1d;
-  --color-accent: #c67139;
-  --color-accent-2: #7a8a5e;
-  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+  --color-bg: #f3e7d1;
+  --color-surface: #ebdcbf;
+  --color-text: #1d1b18;
+  --color-accent: #c9a03c;
+  --color-accent-2: #26503a;
+  --color-divider: color-mix(in srgb, #1d1b18 16%, transparent);
 
-  /* Tonal ramps — one shared lightness scale, so step N of any role matches
-     step N of the others in visual value. */
-  --color-neutral-100: #f9f4ed;
-  --color-neutral-200: #eee7db;
-  --color-neutral-300: #dcd3c4;
-  --color-neutral-400: #c0b6a5;
-  --color-neutral-500: #a19786;
-  --color-neutral-600: #82796a;
-  --color-neutral-700: #645c50;
-  --color-neutral-800: #474238;
-  --color-neutral-900: #2e2b25;
+  /* Ramp emas — dari sorotan bola tenis sampai bayangan pegangan raket. */
+  --color-accent-100: #fdf6e6;
+  --color-accent-200: #f7e8c3;
+  --color-accent-300: #eed69a;
+  --color-accent-400: #ddbb64;
+  --color-accent-500: #c9a03c;
+  --color-accent-600: #a9822c;
+  --color-accent-700: #86651f;
+  --color-accent-800: #614918;
+  --color-accent-900: #3f2f12;
 
-  --color-accent-100: #fff2eb;
-  --color-accent-200: #ffe1d0;
-  --color-accent-300: #ffc6a5;
-  --color-accent-400: #f6a06b;
-  --color-accent-500: #d67f48;
-  --color-accent-600: #b2622d;
-  --color-accent-700: #8c491a;
-  --color-accent-800: #643312;
-  --color-accent-900: #402310;
+  /* Ramp hijau hutan — cincin luar lambang jatuh di sekitar step 700. */
+  --color-accent-2-100: #e9f2ea;
+  --color-accent-2-200: #cfe2d3;
+  --color-accent-2-300: #a8c8b0;
+  --color-accent-2-400: #74a184;
+  --color-accent-2-500: #4a7d5d;
+  --color-accent-2-600: #356446;
+  --color-accent-2-700: #26503a;
+  --color-accent-2-800: #1b3b2a;
+  --color-accent-2-900: #12261b;
 
-  --color-accent-2-100: #f0fae1;
-  --color-accent-2-200: #e1eecc;
-  --color-accent-2-300: #ccdbb2;
-  --color-accent-2-400: #aebf92;
-  --color-accent-2-500: #8fa073;
-  --color-accent-2-600: #728157;
-  --color-accent-2-700: #56633f;
-  --color-accent-2-800: #3d472b;
-  --color-accent-2-900: #272e1b;
+  /* Netral dihangatkan ke arah krem — brief melarang palet abu-abu. */
+  --color-neutral-100: #faf4e9;
+  --color-neutral-200: #efe6d6;
+  --color-neutral-300: #ddd1bc;
+  --color-neutral-400: #c2b49b;
+  --color-neutral-500: #a3947c;
+  --color-neutral-600: #837661;
+  --color-neutral-700: #655a49;
+  --color-neutral-800: #474032;
+  --color-neutral-900: #2e2921;
 
   --font-heading: 'Caprasimo', system-ui, sans-serif;
   --font-body: 'Figtree', system-ui, sans-serif;
@@ -60,10 +72,10 @@
   --radius-lg: 28px;
   --radius-pill: 999px;
 
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2b25 14%, transparent);
-  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2b25 16%, transparent);
-  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2b25 22%, transparent);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2e2921 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2e2921 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2e2921 22%, transparent);
 
-  /* Android chrome — status bar / gesture nav inside the device frame. */
+  /* Android chrome — status bar / gesture nav di dalam bingkai perangkat. */
   --frame-border: rgba(116, 119, 117, 0.5);
 }
