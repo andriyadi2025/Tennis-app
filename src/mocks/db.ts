@@ -5,6 +5,7 @@ import type {
   Court,
   OpenMatch,
   Review,
+  PrimeTime,
   Slot,
   SparringInvite,
   Team,
@@ -14,6 +15,7 @@ import type {
 } from '@/types'
 import {
   CHATS,
+  CLUB_SETTINGS,
   NOTIFICATIONS,
   OPEN_MATCHES,
   REVIEWS,
@@ -70,11 +72,28 @@ export function isSlotAvailable(courtId: string, startsAtIso: string): boolean {
   return ratio >= occupancyThreshold(hour)
 }
 
+/**
+ * Aturan prime time dulu ditanam di sini. Sekarang datang dari pengaturan
+ * klub supaya admin bisa mengubahnya sendiri — venue lain (yang bukan milik
+ * klub) tetap memakai aturan bawaan yang sama seperti sebelumnya.
+ */
+const DEFAULT_PRIME: PrimeTime = { from: 18, to: 21, multiplier: 1.2 }
+
+function primeTimeFor(venueId: string): PrimeTime {
+  return venueId === store.settings.venueId ? store.settings.primeTime : DEFAULT_PRIME
+}
+
+/** Jendela prime time boleh melewati tengah malam, mis. 20.00–01.00. */
+export function isPrimeHour(hour: number, prime: PrimeTime): boolean {
+  if (prime.from <= prime.to) return hour >= prime.from && hour <= prime.to
+  return hour >= prime.from || hour <= prime.to
+}
+
 export function priceFor(venue: Venue, court: Court, hour: number): number {
   const base = court.pricePerHourIdr ?? venue.pricePerHourIdr
-  // Prime time 18.00–21.00 naik 20%, dibulatkan ke Rp1.000 terdekat.
-  const isPrime = hour >= 18 && hour <= 21
-  return isPrime ? Math.round((base * 1.2) / 1_000) * 1_000 : base
+  const prime = primeTimeFor(venue.id)
+  // Dibulatkan ke Rp1.000 terdekat — harga lapangan tidak pernah berkoma.
+  return isPrimeHour(hour, prime) ? Math.round((base * prime.multiplier) / 1_000) * 1_000 : base
 }
 
 export function buildSlots(venue: Venue, court: Court, dayIso: string): Slot[] {
@@ -157,6 +176,8 @@ export const store = {
   notifications: [] as AppNotification[],
   chats: [] as ChatThread[],
   sparring: [] as SparringInvite[],
+  /** Pengaturan klub yang bisa diubah admin lewat dasbor. */
+  settings: structuredClone(CLUB_SETTINGS),
 }
 
 /** Tim dan turnamen yang sudah diikuti user di sesi ini. */
@@ -194,6 +215,7 @@ function loadCollections(): void {
   store.notifications = structuredClone(NOTIFICATIONS)
   store.chats = structuredClone(CHATS)
   store.sparring = structuredClone(SPARRING)
+  store.settings = structuredClone(CLUB_SETTINGS)
   joinedTeams.clear()
   registeredTournaments.clear()
 }
@@ -214,13 +236,32 @@ export function recomputeVenueRating(venueId: string): void {
 }
 
 /**
+ * Menerapkan pengaturan klub ke venue miliknya. Tanpa ini, mengubah jam buka
+ * di dasbor tidak akan terlihat di layar pilih jadwal — dua sumber kebenaran
+ * untuk hal yang sama adalah cara paling cepat membuat keduanya salah.
+ */
+export function applySettingsToVenue(): void {
+  const venue = store.venues.find((v) => v.id === store.settings.venueId)
+  if (!venue) return
+  venue.name = store.settings.name
+  venue.address = store.settings.address
+  venue.district = store.settings.district
+  venue.openHours = { ...store.settings.openHours }
+  venue.pricePerHourIdr = store.settings.basePricePerHourIdr
+  venue.indoor = venue.courts.some((c) => c.indoor)
+  venue.sport = [...new Set(venue.courts.map((c) => c.sport))]
+}
+
+/**
  * Satu booking bawaan yang sudah lunas dan punya split bill berjalan.
  * Tanpa ini, kartu split bill di obrolan grup (layar 18) tidak punya apa pun
  * untuk ditampilkan sampai user menyelesaikan satu booking sendiri.
  */
 function seedBooking(): Booking {
-  const venue = store.venues[0]!
-  const court = venue.courts[2]!
+  // Dicari lewat id, bukan posisi: urutan venue berubah begitu venue klub
+  // ditambahkan di depan, dan indeks diam-diam menunjuk ke yang salah.
+  const venue = store.venues.find((v) => v.id === 'v-cendana') ?? store.venues[0]!
+  const court = venue.courts[2] ?? venue.courts[0]!
   const starts = new Date()
   starts.setDate(starts.getDate() + ((5 - starts.getDay() + 7) % 7 || 7))
   starts.setHours(19, 0, 0, 0)

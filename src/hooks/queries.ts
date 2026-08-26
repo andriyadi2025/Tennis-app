@@ -4,6 +4,9 @@ import type {
   Booking,
   ChatMessage,
   ChatThread,
+  ClubSettings,
+  Court,
+  CourtDraft,
   OpenMatch,
   PaymentMethod,
   Review,
@@ -17,7 +20,7 @@ import type {
   User,
   Venue,
 } from '@/types'
-import { apiGet, apiPost, qs } from '@/lib/api'
+import { apiDelete, apiGet, apiPatch, apiPost, qs } from '@/lib/api'
 import { dayKey } from '@/lib/dates'
 
 export const queryKeys = {
@@ -39,6 +42,8 @@ export const queryKeys = {
   memberships: ['memberships'] as const,
   registrations: ['tournament-registrations'] as const,
   sparring: ['sparring'] as const,
+  settings: ['club-settings'] as const,
+  adminCourts: ['admin-courts'] as const,
   chat: (id: string) => ['chat', id] as const,
 }
 
@@ -376,6 +381,69 @@ export function useRespondSparring() {
       void client.invalidateQueries({ queryKey: queryKeys.sparring })
       void client.invalidateQueries({ queryKey: queryKeys.notifications })
     },
+  })
+}
+
+/* ── Dasbor admin klub ─────────────────────────────────────────────────── */
+
+export function useClubSettings() {
+  return useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: ({ signal }) => apiGet<ClubSettings>('/api/admin/settings', signal),
+  })
+}
+
+/** Menyimpan sebagian pengaturan; server tetap yang memvalidasi. */
+export function useSaveClubSettings() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (patch: Partial<ClubSettings>) =>
+      apiPatch<ClubSettings>('/api/admin/settings', patch),
+    onSuccess: (settings) => {
+      client.setQueryData(queryKeys.settings, settings)
+      // Jam buka & tarif ikut mengubah venue klub, jadi grid slot sudah basi.
+      void client.invalidateQueries({ queryKey: ['venue'] })
+      void client.invalidateQueries({ queryKey: ['venues'] })
+      void client.invalidateQueries({ queryKey: queryKeys.adminCourts })
+    },
+  })
+}
+
+export function useAdminCourts() {
+  return useQuery({
+    queryKey: queryKeys.adminCourts,
+    queryFn: ({ signal }) => apiGet<Court[]>('/api/admin/courts', signal),
+  })
+}
+
+function invalidateCourts(client: ReturnType<typeof useQueryClient>) {
+  void client.invalidateQueries({ queryKey: queryKeys.adminCourts })
+  void client.invalidateQueries({ queryKey: ['venue'] })
+  void client.invalidateQueries({ queryKey: ['venues'] })
+}
+
+export function useAddCourt() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (draft: CourtDraft) => apiPost<Court[]>('/api/admin/courts', draft),
+    onSuccess: () => invalidateCourts(client),
+  })
+}
+
+export function useUpdateCourt() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, draft }: { id: string; draft: CourtDraft }) =>
+      apiPatch<Court[]>(`/api/admin/courts/${id}`, draft),
+    onSuccess: () => invalidateCourts(client),
+  })
+}
+
+export function useDeleteCourt() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiDelete<Court[]>(`/api/admin/courts/${id}`),
+    onSuccess: () => invalidateCourts(client),
   })
 }
 

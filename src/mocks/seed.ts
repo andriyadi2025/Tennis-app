@@ -3,6 +3,7 @@ import type {
   ChatThread,
   Court,
   OpenMatch,
+  ClubSettings,
   Review,
   SparringInvite,
   Team,
@@ -63,7 +64,31 @@ function courts(venueId: string, sport: Court['sport'], count: number, opts: Cou
   })
 }
 
+/** Id venue milik klub sendiri — yang diatur lewat dasbor admin. */
+export const HOME_CLUB_VENUE_ID = 'v-dbtc'
+
 export const VENUES: Venue[] = [
+  {
+    id: HOME_CLUB_VENUE_ID,
+    name: 'Dukuh Bima Tennis Club',
+    sport: ['tennis'],
+    // TODO(klub): alamat asli belum dikirim — diisi admin lewat /admin/klub.
+    address: 'Alamat belum diisi',
+    district: 'Bandung Utara',
+    geo: { lat: -6.8842, lng: 107.6103 },
+    rating: 4.9,
+    reviewCount: 0,
+    photos: [
+      { tone: 'accent2', step: 300, seed: 2 },
+      { tone: 'accent', step: 200, seed: 13 },
+    ],
+    facilities: ['parkir', 'toilet', 'ruangGanti', 'kantin', 'musholla'],
+    courts: courts('v-dbtc', 'tennis', 2, { indoor: false, surface: 'Hard court' }),
+    pricePerHourIdr: 60_000,
+    openHours: { open: 6, close: 22 },
+    indoor: false,
+    distanceKm: 0.4,
+  },
   {
     id: 'v-cendana',
     name: 'GOR Cendana',
@@ -257,6 +282,23 @@ export const VENUES: Venue[] = [
   },
 ]
 
+/**
+ * Nilai awal dasbor admin. Ditulis konservatif dan apa adanya: alamatnya
+ * kosong dan tarifnya bulat, supaya ketahuan bahwa ini belum data DBTC yang
+ * sebenarnya dan memang menunggu diisi admin.
+ */
+export const CLUB_SETTINGS: ClubSettings = {
+  venueId: HOME_CLUB_VENUE_ID,
+  name: 'Dukuh Bima Tennis Club',
+  address: 'Alamat belum diisi',
+  district: 'Bandung Utara',
+  openHours: { open: 6, close: 22 },
+  basePricePerHourIdr: 60_000,
+  serviceFeeIdr: 5_000,
+  primeTime: { from: 18, to: 21, multiplier: 1.2 },
+  membership: { duesMonthlyIdr: 150_000, memberDiscount: 0.2 },
+}
+
 export const CURRENT_USER: User = {
   id: 'u-raka',
   name: 'Raka Pratama',
@@ -267,6 +309,9 @@ export const CURRENT_USER: User = {
   joinedAt: atHour(-420, 9),
   favouriteSport: 'badminton',
   matchesPlayed: 68,
+  // Akun contoh sekaligus admin klub, supaya dasbornya bisa dibuka.
+  role: 'admin',
+  isMember: true,
 }
 
 const MINI_SOCCER_NAMES = [

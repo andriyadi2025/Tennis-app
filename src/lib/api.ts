@@ -44,6 +44,30 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
   return (await response.json()) as T
 }
 
+async function send<T>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
+  })
+  if (!response.ok) throw await parseError(response)
+  return (await response.json()) as T
+}
+
+export function apiPatch<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  return send<T>('PATCH', path, body, signal)
+}
+
+export function apiDelete<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return send<T>('DELETE', path, undefined, signal)
+}
+
 export async function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',

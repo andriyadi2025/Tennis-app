@@ -278,6 +278,8 @@ export interface AppNotification {
 
 export type LoyaltyTier = 'Rookie' | 'Reguler' | 'Pro' | 'Legend'
 
+export type Role = 'member' | 'admin'
+
 export interface User {
   id: string
   name: string
@@ -288,6 +290,56 @@ export interface User {
   joinedAt: string
   favouriteSport: Sport
   matchesPlayed: number
+  /** Hanya `admin` yang boleh membuka dasbor pengaturan klub. */
+  role: Role
+  /** Anggota berbayar dapat potongan tarif sewa. */
+  isMember: boolean
+}
+
+/* ── Pengaturan klub ──────────────────────────────────────────────────────
+ * Nilai-nilai yang dulu ditanam di kode — jam buka, tarif, jendela prime
+ * time — sekarang tinggal di sini supaya admin klub bisa mengubahnya sendiri
+ * tanpa perlu rilis baru.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export interface PrimeTime {
+  /** Jam mulai prime time, 0–23. */
+  from: number
+  /** Jam terakhir yang masih prime time, 0–23 (inklusif). */
+  to: number
+  /** Pengali tarif; 1.2 berarti +20%. */
+  multiplier: number
+}
+
+export interface MembershipSettings {
+  /** Iuran keanggotaan per bulan. */
+  duesMonthlyIdr: number
+  /** Potongan tarif sewa untuk anggota, 0–0.9. */
+  memberDiscount: number
+}
+
+/** Profil dan aturan harga lapangan milik klub sendiri. */
+export interface ClubSettings {
+  venueId: string
+  name: string
+  address: string
+  district: string
+  openHours: OpenHours
+  /** Tarif dasar per jam; tiap lapangan boleh menimpanya sendiri. */
+  basePricePerHourIdr: number
+  serviceFeeIdr: number
+  primeTime: PrimeTime
+  membership: MembershipSettings
+}
+
+/** Lapangan seperti yang diisi admin — belum punya id sampai disimpan. */
+export interface CourtDraft {
+  name: string
+  sport: Sport
+  indoor: boolean
+  surface: string
+  /** Kosong berarti ikut tarif dasar klub. */
+  pricePerHourIdr: number | null
 }
 
 export type SparringStatus = 'menunggu' | 'diterima' | 'ditolak'

@@ -3,6 +3,9 @@ import type {
   AppNotification,
   Booking,
   ChatMessage,
+  ClubSettings,
+  Court,
+  CourtDraft,
   PaymentMethod,
   Review,
   ReviewSummary,
@@ -17,6 +20,7 @@ import { toRange } from '@/lib/slots'
 import { addWeeks, parseISO } from '@/lib/dates'
 import {
   store,
+  applySettingsToVenue,
   buildSlots,
   claimSlots,
   findCourt,
@@ -106,6 +110,59 @@ interface CreateBookingBody {
 
 interface PayBody {
   method: PaymentMethod
+}
+
+/** Gerbang peran. Endpoint admin menolak siapa pun yang bukan admin. */
+function isAdmin(): boolean {
+  return CURRENT_USER.role === 'admin'
+}
+
+function forbidden() {
+  return HttpResponse.json(
+    { code: 'FORBIDDEN', message: 'Hanya admin klub yang boleh mengubah pengaturan ini.' },
+    { status: 403 },
+  )
+}
+
+/**
+ * Validasi pengaturan klub. Pesannya sengaja menjelaskan aturannya, bukan
+ * sekadar bilang "tidak valid" — admin perlu tahu apa yang harus dibetulkan.
+ */
+export function validateSettings(s: ClubSettings): string | null {
+  if (!s.name.trim()) return 'Nama klub tidak boleh kosong.'
+  if (!s.address.trim()) return 'Alamat klub tidak boleh kosong.'
+  const { open, close } = s.openHours
+  if (!Number.isInteger(open) || !Number.isInteger(close)) return 'Jam buka harus bilangan bulat.'
+  if (open < 0 || open > 23) return 'Jam buka harus antara 0 dan 23.'
+  if (close < 1 || close > 24) return 'Jam tutup harus antara 1 dan 24.'
+  if (close <= open) return 'Jam tutup harus lebih malam dari jam buka.'
+  if (s.basePricePerHourIdr < 1_000) return 'Tarif dasar minimal Rp1.000 per jam.'
+  if (s.serviceFeeIdr < 0) return 'Biaya layanan tidak boleh negatif.'
+
+  const { from, to, multiplier } = s.primeTime
+  if (from < 0 || from > 23 || to < 0 || to > 23) return 'Jam prime time harus antara 0 dan 23.'
+  if (multiplier < 1 || multiplier > 3) return 'Pengali prime time harus antara 1 dan 3.'
+
+  const { duesMonthlyIdr, memberDiscount } = s.membership
+  if (duesMonthlyIdr < 0) return 'Iuran tidak boleh negatif.'
+  if (memberDiscount < 0 || memberDiscount > 0.9) {
+    return 'Potongan anggota harus antara 0% dan 90%.'
+  }
+  return null
+}
+
+/** Nama lapangan dipakai user untuk membedakannya, jadi harus unik. */
+export function validateCourt(draft: CourtDraft, siblings: readonly Court[]): string | null {
+  const name = draft.name.trim()
+  if (!name) return 'Nama lapangan tidak boleh kosong.'
+  if (siblings.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) {
+    return `Sudah ada lapangan bernama "${name}".`
+  }
+  if (!draft.surface.trim()) return 'Jenis permukaan tidak boleh kosong.'
+  if (draft.pricePerHourIdr !== null && draft.pricePerHourIdr < 1_000) {
+    return 'Tarif lapangan minimal Rp1.000 per jam.'
+  }
+  return null
 }
 
 export const ADD_ONS = [
@@ -695,6 +752,130 @@ export const handlers = [
     })
     persistDb()
     return HttpResponse.json(invite)
+  }),
+
+  /* ── Dasbor admin klub ───────────────────────────────────────────────── */
+
+  http.get('/api/admin/settings', async () => {
+    await latency()
+    return HttpResponse.json(store.settings)
+  }),
+
+  /**
+   * Menyimpan pengaturan klub. Divalidasi di server, bukan cuma di form:
+   * form bisa dilewati, endpoint tidak.
+   */
+  http.patch('/api/admin/settings', async ({ request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+
+    const patch = (await request.json()) as Partial<ClubSettings>
+    const next: ClubSettings = {
+      ...store.settings,
+      ...patch,
+      openHours: { ...store.settings.openHours, ...(patch.openHours ?? {}) },
+      primeTime: { ...store.settings.primeTime, ...(patch.primeTime ?? {}) },
+      membership: { ...store.settings.membership, ...(patch.membership ?? {}) },
+    }
+
+    const problem = validateSettings(next)
+    if (problem) return HttpResponse.json({ message: problem }, { status: 422 })
+
+    store.settings = next
+    applySettingsToVenue()
+    persistDb()
+    return HttpResponse.json(store.settings)
+  }),
+
+  http.get('/api/admin/courts', async () => {
+    await latency()
+    const venue = findVenue(store.settings.venueId)
+    return HttpResponse.json(venue?.courts ?? [])
+  }),
+
+  http.post('/api/admin/courts', async ({ request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const venue = findVenue(store.settings.venueId)
+    if (!venue) return HttpResponse.json({ message: 'Venue klub tidak ada.' }, { status: 404 })
+
+    const draft = (await request.json()) as CourtDraft
+    const problem = validateCourt(draft, venue.courts)
+    if (problem) return HttpResponse.json({ message: problem }, { status: 422 })
+
+    venue.courts.push({
+      id: `${venue.id}-c${Date.now().toString(36)}`,
+      venueId: venue.id,
+      name: draft.name.trim(),
+      sport: draft.sport,
+      indoor: draft.indoor,
+      surface: draft.surface.trim(),
+      ...(draft.pricePerHourIdr ? { pricePerHourIdr: draft.pricePerHourIdr } : {}),
+    })
+    applySettingsToVenue()
+    persistDb()
+    return HttpResponse.json(venue.courts, { status: 201 })
+  }),
+
+  http.patch('/api/admin/courts/:id', async ({ params, request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const venue = findVenue(store.settings.venueId)
+    const court = venue?.courts.find((c) => c.id === String(params.id))
+    if (!venue || !court) {
+      return HttpResponse.json({ message: 'Lapangan tidak ditemukan.' }, { status: 404 })
+    }
+
+    const draft = (await request.json()) as CourtDraft
+    const problem = validateCourt(
+      draft,
+      venue.courts.filter((c) => c.id !== court.id),
+    )
+    if (problem) return HttpResponse.json({ message: problem }, { status: 422 })
+
+    court.name = draft.name.trim()
+    court.sport = draft.sport
+    court.indoor = draft.indoor
+    court.surface = draft.surface.trim()
+    if (draft.pricePerHourIdr) court.pricePerHourIdr = draft.pricePerHourIdr
+    else delete court.pricePerHourIdr
+
+    applySettingsToVenue()
+    persistDb()
+    return HttpResponse.json(venue.courts)
+  }),
+
+  http.delete('/api/admin/courts/:id', async ({ params }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const venue = findVenue(store.settings.venueId)
+    if (!venue) return HttpResponse.json({ message: 'Venue klub tidak ada.' }, { status: 404 })
+
+    const id = String(params.id)
+    if (venue.courts.length <= 1) {
+      return HttpResponse.json(
+        { code: 'LAST_COURT', message: 'Klub harus punya minimal satu lapangan.' },
+        { status: 409 },
+      )
+    }
+    // Lapangan yang masih punya booking mendatang tidak boleh hilang begitu saja.
+    const upcoming = listBookings().filter(
+      (b) => b.courtId === id && new Date(b.range.endsAt).getTime() > Date.now(),
+    )
+    if (upcoming.length > 0) {
+      return HttpResponse.json(
+        {
+          code: 'HAS_BOOKINGS',
+          message: `Masih ada ${upcoming.length} booking mendatang di lapangan ini.`,
+        },
+        { status: 409 },
+      )
+    }
+
+    venue.courts = venue.courts.filter((c) => c.id !== id)
+    applySettingsToVenue()
+    persistDb()
+    return HttpResponse.json(venue.courts)
   }),
 
   /** Dipakai UI untuk tahu apa yang sudah diikuti user tanpa menebak. */
