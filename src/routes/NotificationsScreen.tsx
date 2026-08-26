@@ -2,7 +2,11 @@ import { Link } from 'react-router-dom'
 import { Bell, CalendarDays, Swords, Users, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppNotification, NotificationKind } from '@/types'
-import { useNotifications } from '@/hooks/queries'
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from '@/hooks/queries'
 import { formatRelative } from '@/lib/dates'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Icon } from '@/components/ui/Icon'
@@ -53,10 +57,28 @@ function groupByTime(rows: AppNotification[]): [string, AppNotification[]][] {
 /** 12 · Notifikasi, dikelompokkan per waktu. */
 export function NotificationsScreen() {
   const notifications = useNotifications()
+  const markRead = useMarkNotificationRead()
+  const markAllRead = useMarkAllNotificationsRead()
+
+  const unread = (notifications.data ?? []).filter((n) => !n.read).length
 
   return (
     <Screen>
-      <ScreenHeader title="Notifikasi" />
+      <ScreenHeader
+        title="Notifikasi"
+        action={
+          unread > 0 ? (
+            <button
+              type="button"
+              onClick={() => markAllRead.mutate()}
+              disabled={markAllRead.isPending}
+              className="min-h-touch px-2 text-base font-semibold text-accent-700 disabled:opacity-45"
+            >
+              Tandai semua
+            </button>
+          ) : undefined
+        }
+      />
 
       <AsyncList
         isLoading={notifications.isLoading}
@@ -79,7 +101,12 @@ export function NotificationsScreen() {
                 <ul className="flex flex-col gap-2">
                   {items.map((item) => (
                     <li key={item.id}>
-                      <NotificationRow notification={item} />
+                      <NotificationRow
+                        notification={item}
+                        onOpen={() => {
+                          if (!item.read) markRead.mutate(item.id)
+                        }}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -92,7 +119,13 @@ export function NotificationsScreen() {
   )
 }
 
-function NotificationRow({ notification }: { notification: AppNotification }) {
+function NotificationRow({
+  notification,
+  onOpen,
+}: {
+  notification: AppNotification
+  onOpen: () => void
+}) {
   const content = (
     <div className="flex items-start gap-3.5 rounded-lg bg-surface p-4">
       <span
@@ -117,6 +150,17 @@ function NotificationRow({ notification }: { notification: AppNotification }) {
     </div>
   )
 
-  if (!notification.href) return content
-  return <Link to={notification.href}>{content}</Link>
+  // Tanpa tujuan, barisnya tetap bisa diketuk hanya untuk menandai dibaca.
+  if (!notification.href) {
+    return (
+      <button type="button" onClick={onOpen} className="w-full text-left">
+        {content}
+      </button>
+    )
+  }
+  return (
+    <Link to={notification.href} onClick={onOpen}>
+      {content}
+    </Link>
+  )
 }

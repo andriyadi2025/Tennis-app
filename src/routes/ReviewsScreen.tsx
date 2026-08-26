@@ -1,8 +1,15 @@
+import { useState } from 'react'
+import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
+import { PenLine, Star } from 'lucide-react'
 import type { ReviewSummary } from '@/types'
-import { useVenue, useVenueReviews } from '@/hooks/queries'
+import { useVenue, useVenueReviews, useWriteReview } from '@/hooks/queries'
 import { formatRelative } from '@/lib/dates'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
+import { Button } from '@/components/ui/Button'
+import { Icon } from '@/components/ui/Icon'
+import { Toast } from '@/components/ui/Toast'
+import { useToast } from '@/hooks/useToast'
 import { Avatar, Chip, ProgressBar, RatingStars } from '@/components/ui/primitives'
 import { AsyncList, EmptyState, RowSkeleton, SkeletonBlock } from '@/components/ui/states'
 
@@ -11,9 +18,10 @@ export function ReviewsScreen() {
   const { id } = useParams<{ id: string }>()
   const venue = useVenue(id)
   const reviews = useVenueReviews(id)
+  const { toast, show } = useToast()
 
   return (
-    <Screen>
+    <Screen overlay={<Toast toast={toast} />}>
       <ScreenHeader title={venue.data?.name ?? 'Ulasan'} />
 
       {reviews.isLoading ? (
@@ -21,6 +29,8 @@ export function ReviewsScreen() {
       ) : reviews.data ? (
         <SummaryPanel summary={reviews.data.summary} />
       ) : null}
+
+      <ReviewForm venueId={id} onDone={() => show('Ulasan kamu sudah tayang. Terima kasih.')} />
 
       <AsyncList
         isLoading={reviews.isLoading}
@@ -65,6 +75,95 @@ export function ReviewsScreen() {
         )}
       </AsyncList>
     </Screen>
+  )
+}
+
+/** Form tulis ulasan — pemilih bintang + isi, divalidasi di server. */
+function ReviewForm({ venueId, onDone }: { venueId: string | undefined; onDone: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [rating, setRating] = useState(0)
+  const [body, setBody] = useState('')
+  const write = useWriteReview(venueId)
+
+  if (!open) {
+    return (
+      <Button variant="secondary" block onClick={() => setOpen(true)}>
+        <Icon icon={PenLine} size={16} />
+        Tulis ulasan
+      </Button>
+    )
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    write.mutate(
+      { rating, body },
+      {
+        onSuccess: () => {
+          setOpen(false)
+          setRating(0)
+          setBody('')
+          onDone()
+        },
+      },
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-4 rounded-lg bg-surface p-4">
+      <h2 className="text-xl">Tulis ulasan</h2>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-base text-neutral-700">Berapa bintang?</legend>
+        <div className="flex gap-1.5">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-label={`${n} bintang`}
+              aria-pressed={rating === n}
+              onClick={() => setRating(n)}
+              className="flex h-11 w-11 items-center justify-center rounded-pill"
+            >
+              <Star
+                size={26}
+                strokeWidth={2.75}
+                className={n <= rating ? 'fill-accent text-accent' : 'text-neutral-400'}
+              />
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="review-body" className="text-base text-neutral-700">
+          Ceritakan pengalamanmu
+        </label>
+        <textarea
+          id="review-body"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={4}
+          placeholder="Lapangannya gimana? Fasilitasnya? Parkirnya?"
+          className="rounded-md border border-divider bg-bg px-4 py-3 text-base placeholder:text-neutral-600 focus:outline-none"
+        />
+      </div>
+
+      {write.error && (
+        <p role="alert" className="text-base text-accent-700">
+          {write.error.message}
+        </p>
+      )}
+
+      <div className="flex gap-3">
+        <Button variant="secondary" block onClick={() => setOpen(false)}>
+          Batal
+        </Button>
+        <Button type="submit" block disabled={rating === 0 || write.isPending}>
+          {write.isPending ? 'Mengirim…' : 'Kirim'}
+        </Button>
+      </div>
+    </form>
   )
 }
 

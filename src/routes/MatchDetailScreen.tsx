@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { Clock, MapPin, MessageCircle, Plus, Users } from 'lucide-react'
 import { LEVEL_LABEL, SPORT_LABEL } from '@/types'
-import { useOpenMatch } from '@/hooks/queries'
+import { useJoinMatch, useMe, useOpenMatch } from '@/hooks/queries'
 import { formatDateLong, formatHour } from '@/lib/dates'
 import { formatIdr } from '@/lib/money'
 import { Screen, ScreenHeader, StickyBar } from '@/components/layout/Screen'
@@ -9,12 +9,17 @@ import { Button, LinkButton } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { Avatar, Chip, ProgressBar } from '@/components/ui/primitives'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
+import { Toast } from '@/components/ui/Toast'
+import { useToast } from '@/hooks/useToast'
 import { SPORT_ICON } from '@/components/domain/sport'
 
 /** 17 · Detail open match — slot pemain kosong. */
 export function MatchDetailScreen() {
   const { id } = useParams<{ id: string }>()
   const match = useOpenMatch(id)
+  const join = useJoinMatch(id)
+  const { data: me } = useMe()
+  const { toast, show } = useToast()
 
   if (match.isLoading) {
     return (
@@ -41,9 +46,19 @@ export function MatchDetailScreen() {
   const data = match.data
   const open = data.slotsTotal - data.players.length
   const full = open <= 0
+  const joined = data.players.some((p) => p.id === me?.id)
+
+  function onJoinToggle() {
+    join.mutate(joined ? 'leave' : 'join', {
+      onSuccess: () =>
+        show(joined ? 'Kamu keluar dari sesi ini.' : 'Berhasil gabung. Sampai ketemu di lapangan.'),
+      onError: (error) => show(error.message, 'gagal'),
+    })
+  }
 
   return (
     <Screen
+      overlay={<Toast toast={toast} />}
       bottom={
         <StickyBar>
           <div className="flex flex-col">
@@ -52,8 +67,20 @@ export function MatchDetailScreen() {
               {formatIdr(data.pricePerPersonIdr)}
             </span>
           </div>
-          <Button size="lg" className="flex-1" disabled={full}>
-            {full ? 'Slot penuh' : 'Gabung sekarang'}
+          <Button
+            size="lg"
+            className="flex-1"
+            variant={joined ? 'secondary' : 'primary'}
+            disabled={(full && !joined) || join.isPending}
+            onClick={onJoinToggle}
+          >
+            {join.isPending
+              ? 'Memproses…'
+              : joined
+                ? 'Batal gabung'
+                : full
+                  ? 'Slot penuh'
+                  : 'Gabung sekarang'}
           </Button>
         </StickyBar>
       }

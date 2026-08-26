@@ -12,12 +12,17 @@ import { Icon } from '@/components/ui/Icon'
 import { Avatar, Chip, ProgressBar } from '@/components/ui/primitives'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
 
-const MENU: { to: string; label: string; icon: LucideIcon }[] = [
+/**
+ * Menu akun. `Pengaturan` belum punya layar sendiri, jadi ditandai `soon`
+ * dan dirender sebagai baris mati yang jujur — bukan tautan yang memutar
+ * balik ke halaman yang sama.
+ */
+const MENU: { to: string; label: string; icon: LucideIcon; soon?: true }[] = [
   { to: '/bookings', label: 'Metode pembayaran', icon: CreditCard },
-  { to: '/team/t-smash', label: 'Tim & komunitas', icon: Users },
+  { to: '/match', label: 'Tim & komunitas', icon: Users },
   { to: '/tournaments', label: 'Turnamen saya', icon: Trophy },
   { to: '/notifications', label: 'Notifikasi', icon: Bell },
-  { to: '/profile', label: 'Pengaturan', icon: Settings },
+  { to: '/profile', label: 'Pengaturan', icon: Settings, soon: true },
 ]
 
 /** 10 · Profil & poin loyalitas. */
@@ -102,20 +107,34 @@ export function ProfileScreen() {
       <section className="flex flex-col gap-2.5">
         <h2 className="text-3xl">Akun</h2>
         <ul className="flex flex-col gap-2">
-          {MENU.map(({ to, label, icon }) => (
-            <li key={label}>
-              <Link
-                to={to}
-                className="flex min-h-touch items-center gap-3.5 rounded-md bg-surface px-4 py-3"
-              >
+          {MENU.map(({ to, label, icon, soon }) => {
+            const inner = (
+              <>
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill bg-neutral-200 text-neutral-800">
                   <Icon icon={icon} size={18} />
                 </span>
                 <span className="flex-1 text-base font-semibold">{label}</span>
-                <Icon icon={ChevronRight} size={17} className="text-neutral-600" />
-              </Link>
-            </li>
-          ))}
+                {soon ? (
+                  <Chip tone="neutral">Segera</Chip>
+                ) : (
+                  <Icon icon={ChevronRight} size={17} className="text-neutral-600" />
+                )}
+              </>
+            )
+            const className =
+              'flex min-h-touch items-center gap-3.5 rounded-md bg-surface px-4 py-3'
+            return (
+              <li key={label}>
+                {soon ? (
+                  <div className={`${className} opacity-60`}>{inner}</div>
+                ) : (
+                  <Link to={to} className={className}>
+                    {inner}
+                  </Link>
+                )}
+              </li>
+            )
+          })}
         </ul>
       </section>
 

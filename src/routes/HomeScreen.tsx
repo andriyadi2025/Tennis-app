@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { Bell, ChevronRight, MapPin, Search, Swords, Trophy, Users } from 'lucide-react'
 import type { Sport } from '@/types'
 import { SPORTS, SPORT_LABEL } from '@/types'
-import { useMe, useOpenMatches, useVenues } from '@/hooks/queries'
+import { useMe, useNotifications, useOpenMatches, useVenues } from '@/hooks/queries'
 import { useAuthStore } from '@/store/auth'
 import { formatHour } from '@/lib/dates'
 import { Screen, SectionHeading } from '@/components/layout/Screen'
@@ -42,6 +42,8 @@ export function HomeScreen() {
   const storedUser = useAuthStore((s) => s.user)
   const { data: me } = useMe()
   const user = me ?? storedUser
+  const notifications = useNotifications()
+  const unread = (notifications.data ?? []).filter((n) => !n.read).length
   const firstName = (user?.name ?? '').split(' ')[0] ?? ''
 
   return (
@@ -58,11 +60,17 @@ export function HomeScreen() {
         </div>
         <Link
           to="/notifications"
-          aria-label="Notifikasi"
+          aria-label={unread > 0 ? `Notifikasi, ${unread} belum dibaca` : 'Notifikasi'}
           className="relative flex h-11 w-11 items-center justify-center rounded-pill bg-surface"
         >
           <Icon icon={Bell} size={20} />
-          <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-pill border-2 border-bg bg-accent" />
+          {/* Titik hanya muncul kalau memang ada yang belum dibaca. */}
+          {unread > 0 && (
+            <span
+              aria-hidden
+              className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-pill border-2 border-bg bg-accent"
+            />
+          )}
         </Link>
       </header>
 

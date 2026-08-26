@@ -1,12 +1,14 @@
 import { useParams } from 'react-router-dom'
 import { CalendarPlus, MapPin, Send, Swords } from 'lucide-react'
 import { LEVEL_LABEL, SPORT_LABEL } from '@/types'
-import { useTeam, useTeams } from '@/hooks/queries'
+import { useJoinTeam, useMemberships, useRequestSparring, useTeam, useTeams } from '@/hooks/queries'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { Avatar, Chip, VenuePhoto } from '@/components/ui/primitives'
 import { ErrorState, RowSkeleton, SkeletonBlock } from '@/components/ui/states'
+import { Toast } from '@/components/ui/Toast'
+import { useToast } from '@/hooks/useToast'
 import { TeamCard } from '@/components/domain/cards'
 
 /** 16 · Tim & komunitas. */
@@ -14,6 +16,11 @@ export function TeamScreen() {
   const { id } = useParams<{ id: string }>()
   const team = useTeam(id)
   const others = useTeams()
+  const join = useJoinTeam(id)
+  const spar = useRequestSparring(id)
+  const memberships = useMemberships()
+  const { toast, show } = useToast()
+  const joined = (memberships.data?.teams ?? []).includes(id ?? '')
 
   if (team.isLoading) {
     return (
@@ -42,7 +49,7 @@ export function TeamScreen() {
   const winRate = played === 0 ? 0 : Math.round((data.wins / played) * 100)
 
   return (
-    <Screen>
+    <Screen overlay={<Toast toast={toast} />}>
       <ScreenHeader title={data.name} />
 
       <section className="flex flex-col items-center gap-3 rounded-lg bg-surface p-5 text-center">
@@ -64,13 +71,32 @@ export function TeamScreen() {
       </section>
 
       <div className="flex gap-3">
-        <Button block>
+        <Button
+          block
+          disabled={spar.isPending}
+          onClick={() =>
+            spar.mutate(undefined, {
+              onSuccess: () => show(`Ajakan sparring terkirim ke ${data.name}.`),
+              onError: (error) => show(error.message, 'gagal'),
+            })
+          }
+        >
           <Icon icon={Swords} size={16} />
-          Ajak sparring
+          {spar.isPending ? 'Mengirim…' : 'Ajak sparring'}
         </Button>
-        <Button variant="secondary" block>
+        <Button
+          variant="secondary"
+          block
+          disabled={joined || join.isPending}
+          onClick={() =>
+            join.mutate(undefined, {
+              onSuccess: () => show(`Kamu resmi jadi anggota ${data.name}.`),
+              onError: (error) => show(error.message, 'gagal'),
+            })
+          }
+        >
           <Icon icon={Send} size={16} />
-          Gabung
+          {joined ? 'Sudah gabung' : join.isPending ? 'Memproses…' : 'Gabung'}
         </Button>
       </div>
 

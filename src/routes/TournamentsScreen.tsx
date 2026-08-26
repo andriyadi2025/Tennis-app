@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { TournamentStatus } from '@/types'
-import { useTournaments } from '@/hooks/queries'
+import { useMemberships, useRegisterTournament, useTournaments } from '@/hooks/queries'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
+import { Button } from '@/components/ui/Button'
+import { Toast } from '@/components/ui/Toast'
+import { useToast } from '@/hooks/useToast'
 import { AsyncList, EmptyState, ListSkeleton } from '@/components/ui/states'
 import { TournamentCard } from '@/components/domain/cards'
 
@@ -17,11 +20,15 @@ const TABS: { value: TournamentStatus | 'semua'; label: string }[] = [
 export function TournamentsScreen() {
   const [tab, setTab] = useState<TournamentStatus | 'semua'>('semua')
   const tournaments = useTournaments()
+  const register = useRegisterTournament()
+  const memberships = useMemberships()
+  const { toast, show } = useToast()
+  const registeredIds = memberships.data?.tournaments ?? []
 
   const rows = (tournaments.data ?? []).filter((t) => (tab === 'semua' ? true : t.status === tab))
 
   return (
-    <Screen>
+    <Screen overlay={<Toast toast={toast} />}>
       <ScreenHeader title="Turnamen" />
 
       <div className="row-scroll -mx-5 flex gap-2 px-5" role="tablist" aria-label="Status turnamen">
@@ -59,11 +66,39 @@ export function TournamentsScreen() {
       >
         {(items) => (
           <ul className="flex flex-col gap-4">
-            {items.map((tournament) => (
-              <li key={tournament.id}>
-                <TournamentCard tournament={tournament} />
-              </li>
-            ))}
+            {items.map((tournament) => {
+              const registered = registeredIds.includes(tournament.id)
+              const closed = tournament.status !== 'pendaftaran'
+              const full = tournament.slotsTaken >= tournament.slotsTotal
+              return (
+                <li key={tournament.id}>
+                  <TournamentCard
+                    tournament={tournament}
+                    action={
+                      <Button
+                        block
+                        variant={registered ? 'secondary' : 'primary'}
+                        disabled={registered || closed || full || register.isPending}
+                        onClick={() =>
+                          register.mutate(tournament.id, {
+                            onSuccess: () => show(`Kamu terdaftar di ${tournament.name}.`),
+                            onError: (error) => show(error.message, 'gagal'),
+                          })
+                        }
+                      >
+                        {registered
+                          ? 'Sudah terdaftar'
+                          : closed
+                            ? 'Pendaftaran ditutup'
+                            : full
+                              ? 'Kuota penuh'
+                              : 'Daftar'}
+                      </Button>
+                    }
+                  />
+                </li>
+              )
+            })}
           </ul>
         )}
       </AsyncList>

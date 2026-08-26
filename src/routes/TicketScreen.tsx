@@ -7,10 +7,14 @@ import { useBooking } from '@/hooks/queries'
 import { useDraftStore } from '@/store/draft'
 import { formatDateLong, formatHourRange } from '@/lib/dates'
 import { formatIdr } from '@/lib/money'
+import { downloadIcs } from '@/lib/calendar'
+import { share } from '@/lib/share'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Button, LinkButton } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { Chip } from '@/components/ui/primitives'
+import { Toast } from '@/components/ui/Toast'
+import { useToast } from '@/hooks/useToast'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
 
 /** 08 · E-tiket QR. */
@@ -18,6 +22,7 @@ export function TicketScreen() {
   const { id } = useParams<{ id: string }>()
   const booking = useBooking(id)
   const resetDraft = useDraftStore((s) => s.reset)
+  const { toast, show } = useToast()
 
   /*
    * Begitu tiket ada, draft sudah selesai tugasnya. Dibersihkan di sini —
@@ -53,7 +58,7 @@ export function TicketScreen() {
   const data = booking.data
 
   return (
-    <Screen>
+    <Screen overlay={<Toast toast={toast} />}>
       <ScreenHeader title="E-tiket" />
 
       <div className="flex flex-col gap-2">
@@ -124,11 +129,33 @@ export function TicketScreen() {
       </article>
 
       <div className="flex gap-3">
-        <Button variant="secondary" block>
+        <Button
+          variant="secondary"
+          block
+          onClick={() => {
+            void share({
+              title: 'Booking Lapangin',
+              text: `Main ${SPORT_LABEL[data.sport]} di ${data.venueName}, ${formatDateLong(
+                data.range.startsAt,
+              )} ${formatHourRange(data.range.startsAt, data.range.endsAt)}. Kode ${data.code}.`,
+              url: window.location.href,
+            }).then((outcome) => {
+              if (outcome === 'copied') show('Detail booking tersalin.')
+              else if (outcome === 'unsupported') show('Berbagi tidak tersedia di sini.', 'gagal')
+            })
+          }}
+        >
           <Icon icon={Share2} size={16} />
           Bagikan
         </Button>
-        <Button variant="secondary" block>
+        <Button
+          variant="secondary"
+          block
+          onClick={() => {
+            downloadIcs(data)
+            show('Berkas kalender diunduh.')
+          }}
+        >
           <Icon icon={CalendarPlus} size={16} />
           Kalender
         </Button>
@@ -138,7 +165,10 @@ export function TicketScreen() {
         variant="ghost"
         block
         onClick={() => {
-          void navigator.clipboard?.writeText(data.code)
+          void navigator.clipboard
+            ?.writeText(data.code)
+            .then(() => show('Kode booking tersalin.'))
+            .catch(() => show('Gagal menyalin kode.', 'gagal'))
         }}
       >
         <Icon icon={Copy} size={16} />
