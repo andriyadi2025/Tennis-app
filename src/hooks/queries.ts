@@ -10,8 +10,10 @@ import type {
   ReviewSummary,
   Slot,
   Sport,
+  SparringInvite,
   Team,
   Tournament,
+  TournamentRegistration,
   User,
   Venue,
 } from '@/types'
@@ -35,6 +37,8 @@ export const queryKeys = {
   team: (id: string) => ['team', id] as const,
   notifications: ['notifications'] as const,
   memberships: ['memberships'] as const,
+  registrations: ['tournament-registrations'] as const,
+  sparring: ['sparring'] as const,
   chat: (id: string) => ['chat', id] as const,
 }
 
@@ -323,20 +327,54 @@ export function useJoinTeam(id: string | undefined) {
 export function useRequestSparring(id: string | undefined) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: () => apiPost<AppNotification>(`/api/teams/${id}/spar`, {}),
+    mutationFn: (message?: string) => apiPost<SparringInvite>(`/api/teams/${id}/spar`, { message }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.notifications })
     },
   })
 }
 
+export interface RegisterResult {
+  tournament: Tournament
+  registration: TournamentRegistration
+}
+
 export function useRegisterTournament() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => apiPost<Tournament>(`/api/tournaments/${id}/register`, {}),
+    mutationFn: ({ id, method }: { id: string; method: PaymentMethod }) =>
+      apiPost<RegisterResult>(`/api/tournaments/${id}/register`, { method }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.tournaments })
       void client.invalidateQueries({ queryKey: queryKeys.memberships })
+      void client.invalidateQueries({ queryKey: queryKeys.registrations })
+    },
+  })
+}
+
+export function useRegistrations() {
+  return useQuery({
+    queryKey: queryKeys.registrations,
+    queryFn: ({ signal }) =>
+      apiGet<TournamentRegistration[]>('/api/tournaments/registrations', signal),
+  })
+}
+
+export function useSparring() {
+  return useQuery({
+    queryKey: queryKeys.sparring,
+    queryFn: ({ signal }) => apiGet<SparringInvite[]>('/api/sparring', signal),
+  })
+}
+
+export function useRespondSparring() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, accept }: { id: string; accept: boolean }) =>
+      apiPost<SparringInvite>(`/api/sparring/${id}/respond`, { accept }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.sparring })
+      void client.invalidateQueries({ queryKey: queryKeys.notifications })
     },
   })
 }

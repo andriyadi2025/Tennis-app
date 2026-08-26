@@ -8,6 +8,8 @@ import type {
   ReviewSummary,
   Slot,
   Sport,
+  SparringInvite,
+  TournamentRegistration,
   Venue,
 } from '@/types'
 import { computePrice } from '@/lib/pricing'
@@ -23,11 +25,17 @@ import {
   isCursedSlot,
   isSlotAvailable,
   listBookings,
+  listRegistrations,
   membership,
+  persistDb,
+  saveRegistration,
   recomputeVenueRating,
   saveBooking,
 } from './db'
 import { CURRENT_USER } from './seed'
+
+/** Tim yang dianggap milik user; pengirim tiap ajakan sparring keluar. */
+const MY_TEAM = { id: 't-garuda', name: 'Garuda Muda FC' }
 
 /**
  * Latensi buatan 300–800ms supaya skeleton benar-benar terlihat saat app
@@ -263,6 +271,7 @@ export const handlers = [
       paymentDeadline: new Date(Date.now() + PAYMENT_HOLD_MS).toISOString(),
     }
     saveBooking(booking)
+    persistDb()
     return HttpResponse.json(booking, { status: 201 })
   }),
 
@@ -335,6 +344,7 @@ export const handlers = [
       paymentDeadline: null,
     }
     saveBooking(confirmed)
+    persistDb()
     return HttpResponse.json(confirmed)
   }),
 
@@ -345,6 +355,7 @@ export const handlers = [
     const body = (await request.json()) as { splitBill: Booking['splitBill'] }
     const next = { ...booking, splitBill: body.splitBill }
     saveBooking(next)
+    persistDb()
     return HttpResponse.json(next)
   }),
 
@@ -412,6 +423,7 @@ export const handlers = [
       sentAt: new Date().toISOString(),
     }
     chat.messages.push(message)
+    persistDb()
     return HttpResponse.json(message, { status: 201 })
   }),
 
@@ -442,6 +454,7 @@ export const handlers = [
       name: CURRENT_USER.name.split(' ')[0] ?? CURRENT_USER.name,
       level: 'menengah',
     })
+    persistDb()
     return HttpResponse.json(match)
   }),
 
@@ -451,6 +464,7 @@ export const handlers = [
     if (!match)
       return HttpResponse.json({ message: 'Open match tidak ditemukan.' }, { status: 404 })
     match.players = match.players.filter((p) => p.id !== CURRENT_USER.id)
+    persistDb()
     return HttpResponse.json(match)
   }),
 
@@ -459,6 +473,7 @@ export const handlers = [
     const item = store.notifications.find((n) => n.id === String(params.id))
     if (!item) return HttpResponse.json({ message: 'Notifikasi tidak ditemukan.' }, { status: 404 })
     item.read = true
+    persistDb()
     return HttpResponse.json(item)
   }),
 
@@ -467,6 +482,7 @@ export const handlers = [
     store.notifications.forEach((n) => {
       n.read = true
     })
+    persistDb()
     return HttpResponse.json(store.notifications)
   }),
 
@@ -500,6 +516,7 @@ export const handlers = [
     }
     store.reviews.unshift(review)
     recomputeVenueRating(venueId)
+    persistDb()
     return HttpResponse.json(review, { status: 201 })
   }),
 
@@ -520,28 +537,61 @@ export const handlers = [
       name: CURRENT_USER.name.split(' ')[0] ?? CURRENT_USER.name,
       level: 'menengah',
     })
+    persistDb()
     return HttpResponse.json(team)
   }),
 
-  /** Ajakan sparring — dicatat sebagai notifikasi, belum ada inbox terpisah. */
-  http.post('/api/teams/:id/spar', async ({ params }) => {
+  /** Ajakan sparring keluar — masuk ke kotak ajakan sebagai `keluar`. */
+  http.post('/api/teams/:id/spar', async ({ params, request }) => {
     await latency()
     const team = store.teams.find((t) => t.id === String(params.id))
     if (!team) return HttpResponse.json({ message: 'Tim tidak ditemukan.' }, { status: 404 })
-    const notification: AppNotification = {
+
+    const pending = store.sparring.find(
+      (s) => s.direction === 'keluar' && s.toTeamId === team.id && s.status === 'menunggu',
+    )
+    if (pending) {
+      return HttpResponse.json(
+        { code: 'ALREADY_SENT', message: `Ajakan ke ${team.name} masih menunggu jawaban.` },
+        { status: 409 },
+      )
+    }
+
+    const body = (await request.json().catch(() => ({}))) as { message?: string }
+    const invite: SparringInvite = {
+      id: `sp-${Date.now().toString(36)}`,
+      direction: 'keluar',
+      fromTeamId: MY_TEAM.id,
+      fromTeamName: MY_TEAM.name,
+      toTeamId: team.id,
+      toTeamName: team.name,
+      sport: team.sport,
+      proposedAt: null,
+      venueName: null,
+      message: body.message?.trim() || 'Ada slot buat sparring minggu ini?',
+      status: 'menunggu',
+      createdAt: new Date().toISOString(),
+    }
+    store.sparring.unshift(invite)
+
+    store.notifications.unshift({
       id: `n-${Date.now().toString(36)}`,
       kind: 'match',
       title: `Ajakan sparring terkirim ke ${team.name}`,
       body: 'Kami kabari begitu mereka membalas.',
       createdAt: new Date().toISOString(),
       read: false,
-      href: `/team/${team.id}`,
-    }
-    store.notifications.unshift(notification)
-    return HttpResponse.json(notification, { status: 201 })
+      href: '/sparring',
+    })
+    persistDb()
+    return HttpResponse.json(invite, { status: 201 })
   }),
 
-  http.post('/api/tournaments/:id/register', async ({ params }) => {
+  /**
+   * Daftar turnamen. Kuota hanya bergerak setelah biaya daftar dibayar —
+   * mendaftar dan membayar bukan dua hal terpisah di sini.
+   */
+  http.post('/api/tournaments/:id/register', async ({ params, request }) => {
     await latency()
     const tournament = store.tournaments.find((t) => t.id === String(params.id))
     if (!tournament) {
@@ -565,9 +615,86 @@ export const handlers = [
         { status: 409 },
       )
     }
+
+    const body = (await request.json()) as { method?: PaymentMethod }
+    const method = body.method
+    if (!method) {
+      return HttpResponse.json(
+        { code: 'NO_METHOD', message: 'Pilih metode pembayaran dulu.' },
+        { status: 422 },
+      )
+    }
+
     membership.register(tournament.id)
     tournament.slotsTaken += 1
-    return HttpResponse.json(tournament)
+
+    const registration: TournamentRegistration = {
+      id: `trg-${Date.now().toString(36)}`,
+      tournamentId: tournament.id,
+      tournamentName: tournament.name,
+      entryFeeIdr: tournament.entryFeeIdr,
+      paymentMethod: method,
+      // Bayar di tempat berarti belum lunas, dan itu harus terlihat jujur.
+      paymentStatus: method === 'onsite' ? 'menunggu' : 'lunas',
+      registeredAt: new Date().toISOString(),
+      code: bookingCode().replace('LPG-', 'TRN-'),
+    }
+    saveRegistration(registration)
+    persistDb()
+    return HttpResponse.json({ tournament, registration })
+  }),
+
+  http.get('/api/tournaments/registrations', async () => {
+    await latency()
+    return HttpResponse.json(listRegistrations())
+  }),
+
+  /* ── Ajakan sparring ─────────────────────────────────────────────────── */
+
+  http.get('/api/sparring', async () => {
+    await latency()
+    const list = [...store.sparring].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+    return HttpResponse.json(list)
+  }),
+
+  http.post('/api/sparring/:id/respond', async ({ params, request }) => {
+    await latency()
+    const invite = store.sparring.find((s) => s.id === String(params.id))
+    if (!invite) return HttpResponse.json({ message: 'Ajakan tidak ditemukan.' }, { status: 404 })
+
+    if (invite.direction !== 'masuk') {
+      return HttpResponse.json(
+        { code: 'NOT_YOURS', message: 'Ajakan ini menunggu jawaban tim lain, bukan kamu.' },
+        { status: 409 },
+      )
+    }
+    if (invite.status !== 'menunggu') {
+      return HttpResponse.json(
+        { code: 'ALREADY_ANSWERED', message: 'Ajakan ini sudah dijawab.' },
+        { status: 409 },
+      )
+    }
+
+    const body = (await request.json()) as { accept: boolean }
+    invite.status = body.accept ? 'diterima' : 'ditolak'
+
+    store.notifications.unshift({
+      id: `n-${Date.now().toString(36)}`,
+      kind: 'match',
+      title: body.accept
+        ? `Sparring dengan ${invite.fromTeamName} disetujui`
+        : `Ajakan ${invite.fromTeamName} ditolak`,
+      body: body.accept
+        ? 'Kami kabari mereka. Atur jadwal lapangannya dari halaman tim.'
+        : 'Mereka sudah diberi tahu.',
+      createdAt: new Date().toISOString(),
+      read: false,
+      href: '/sparring',
+    })
+    persistDb()
+    return HttpResponse.json(invite)
   }),
 
   /** Dipakai UI untuk tahu apa yang sudah diikuti user tanpa menebak. */
