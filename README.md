@@ -235,7 +235,7 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm test` — 140 tes, 17 berkas.
+`npm test` — 168 tes, 19 berkas.
 
 **Unit (`src/lib/*.test.ts`)** — perhitungan harga, penukaran poin dan batas
 30%, pembulatan split bill (termasuk pembuktian bahwa jumlah seluruh bagian
@@ -336,8 +336,10 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 
 ## Yang masih mock
 
-- **Seluruh data venue.** Nama venue, alamat, tarif, dan jam buka masih data
-  contoh Bandung — bukan data DBTC. Lihat "Yang masih ditunggu dari klub".
+- **Venue selain klub** masih data contoh Bandung. Data klub sendiri diisi
+  lewat dasbor admin — lihat bagian "Dasbor admin klub".
+- **Iuran keanggotaan** hanya angka yang ditampilkan; belum ada penagihan
+  maupun status anggota yang kedaluwarsa.
 - **Seluruh backend.** Tidak ada server, tidak ada database. Datanya hidup di
   memori dan disalin ke localStorage peramban ini saja — tidak ada yang sampai
   ke perangkat lain, dan snapshot dibuang saat harinya berganti.
@@ -354,20 +356,41 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
   usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
 
-## Yang masih ditunggu dari klub
+## Dasbor admin klub
 
-Logo sudah masuk dan sudah terpasang. Tiga hal berikut sudah dijanjikan tapi
-belum ada, jadi datanya masih memakai contoh Bandung bawaan:
+Data klub tidak lagi ditanam di kode. Admin mengisinya sendiri lewat **Profil →
+Dasbor klub**, dan yang diisi langsung dipakai app:
 
-1. **Jumlah & nama lapangan DBTC** — berapa lapangan, namanya apa, indoor atau
-   outdoor, jenis permukaannya. Menggantikan `VENUES` di `src/mocks/seed.ts`.
-2. **Tarif & iuran** — sewa per jam untuk anggota dan non-anggota, aturan prime
-   time yang benar, dan besaran iuran keanggotaan.
-3. **Jam buka & lokasi** — jam operasional, alamat, dan area, untuk mengganti
-   `openHours`, `address`, dan daftar `AREAS`.
+| Diatur di                        | Berpengaruh ke                               |
+| -------------------------------- | -------------------------------------------- |
+| Jumlah & nama lapangan           | Tab lapangan di layar pilih jadwal           |
+| Tarif dasar & tarif per lapangan | Harga tiap slot                              |
+| Jendela prime time & pengalinya  | Jam mana yang lebih mahal, dan berapa        |
+| Jam buka & tutup                 | Jam mana saja yang muncul di grid slot       |
+| Nama, alamat, area               | Kartu venue, detail venue, header Home       |
+| Iuran & potongan anggota         | Ditampilkan di tarif; belum menagih otomatis |
 
-Sampai itu tiba, seluruh venue, harga, dan alamat di app adalah karangan yang
-masuk akal — bukan data DBTC. Jangan dipakai untuk keputusan apa pun.
+Aturan prime time dulu ditanam di `priceFor()` sebagai 18–21 ×1,2. Sekarang
+datang dari pengaturan, boleh melewati tengah malam (mis. 20–01), dan venue
+selain milik klub tetap memakai aturan bawaan.
+
+Validasinya di server, bukan cuma di form — form bisa dilewati, endpoint tidak.
+Lapangan terakhir tidak bisa dihapus, dan lapangan yang masih punya booking
+mendatang menolak dihapus sambil menyebut jumlahnya.
+
+Peran disimpan di `User.role`. Rute `/admin` dijaga di klien supaya menunya
+tidak muncul untuk anggota biasa; penjaga sebenarnya tetap di server, karena
+penjaga klien bisa dilewati.
+
+### Yang masih perlu diisi
+
+Nilai awalnya sengaja ditulis apa adanya — alamatnya "Alamat belum diisi" dan
+tarifnya bulat — supaya ketahuan bahwa itu belum data DBTC. Dasbor menandainya
+"Belum lengkap" sampai alamatnya diisi.
+
+Venue **selain** klub (GOR Cendana dan kawan-kawan) masih data contoh Bandung
+dan tidak bisa diubah dari dasbor; itu memang milik pihak lain di dalam cerita
+app ini.
 
 Masih berguna kalau ada: **foto lapangan asli** (minimal 3, rasio 4:3) untuk
 menggantikan blok warna placeholder, ketentuan pembatalan, dan aturan poin
