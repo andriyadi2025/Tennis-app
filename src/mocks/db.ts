@@ -6,11 +6,23 @@ import type {
   OpenMatch,
   Review,
   Slot,
+  SparringInvite,
   Team,
   Tournament,
+  TournamentRegistration,
   Venue,
 } from '@/types'
-import { CHATS, NOTIFICATIONS, OPEN_MATCHES, REVIEWS, TEAMS, TOURNAMENTS, VENUES } from './seed'
+import {
+  CHATS,
+  NOTIFICATIONS,
+  OPEN_MATCHES,
+  REVIEWS,
+  SPARRING,
+  TEAMS,
+  TOURNAMENTS,
+  VENUES,
+} from './seed'
+import { readJson, remove, writeJson } from '@/lib/storage'
 
 /**
  * "Database" in-memory untuk MSW. Ketersediaan slot dihitung dari hash yang
@@ -144,11 +156,27 @@ export const store = {
   tournaments: [] as Tournament[],
   notifications: [] as AppNotification[],
   chats: [] as ChatThread[],
+  sparring: [] as SparringInvite[],
 }
 
 /** Tim dan turnamen yang sudah diikuti user di sesi ini. */
 const joinedTeams = new Set<string>()
 const registeredTournaments = new Set<string>()
+const registrations = new Map<string, TournamentRegistration>()
+
+export function saveRegistration(registration: TournamentRegistration): void {
+  registrations.set(registration.id, registration)
+}
+
+export function listRegistrations(): TournamentRegistration[] {
+  return [...registrations.values()].sort(
+    (a, b) => new Date(b.registeredAt).getTime() - new Date(a.registeredAt).getTime(),
+  )
+}
+
+export function findRegistration(tournamentId: string): TournamentRegistration | undefined {
+  return [...registrations.values()].find((r) => r.tournamentId === tournamentId)
+}
 
 export const membership = {
   hasJoinedTeam: (id: string) => joinedTeams.has(id),
@@ -165,6 +193,7 @@ function loadCollections(): void {
   store.tournaments = structuredClone(TOURNAMENTS)
   store.notifications = structuredClone(NOTIFICATIONS)
   store.chats = structuredClone(CHATS)
+  store.sparring = structuredClone(SPARRING)
   joinedTeams.clear()
   registeredTournaments.clear()
 }
@@ -240,6 +269,7 @@ function seedBooking(): Booking {
 
 function seed(): void {
   loadCollections()
+  registrations.clear()
   const booking = seedBooking()
   bookings.set(booking.id, booking)
   claimSlots(booking.courtId, [
@@ -248,11 +278,77 @@ function seed(): void {
   ])
 }
 
-seed()
+/* ── Persistensi ──────────────────────────────────────────────────────────
+ * Tanpa ini, booking dan segala aksi hilang tiap halaman dimuat ulang, dan
+ * app terasa seperti demo yang lupa ingatan. Isinya tetap in-memory saat
+ * berjalan; localStorage hanya dipakai supaya bertahan antar reload.
+ * ──────────────────────────────────────────────────────────────────────── */
 
-/** Dipakai tes supaya tiap kasus mulai dari state yang sama dengan app baru dimuat. */
+const SNAPSHOT_KEY = 'mock-db'
+/** Naikkan kalau bentuk data berubah, supaya snapshot lama dibuang. */
+const SNAPSHOT_VERSION = 1
+
+interface Snapshot {
+  version: number
+  /** Tanggal snapshot dibuat. Data seed relatif terhadap "hari ini", jadi
+   *  snapshot dari hari lain sudah basi dan harus dibuang, bukan dipulihkan. */
+  day: string
+  takenSlots: string[]
+  bookings: Booking[]
+  registrations: TournamentRegistration[]
+  joinedTeams: string[]
+  registeredTournaments: string[]
+  store: typeof store
+}
+
+function todayKey(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+export function persistDb(): void {
+  writeJson(SNAPSHOT_KEY, {
+    version: SNAPSHOT_VERSION,
+    day: todayKey(),
+    takenSlots: [...takenSlots],
+    bookings: [...bookings.values()],
+    registrations: [...registrations.values()],
+    joinedTeams: [...joinedTeams],
+    registeredTournaments: [...registeredTournaments],
+    store,
+  } satisfies Snapshot)
+}
+
+function restoreDb(): boolean {
+  const snapshot = readJson<Snapshot | null>(SNAPSHOT_KEY, null)
+  if (!snapshot) return false
+  if (snapshot.version !== SNAPSHOT_VERSION || snapshot.day !== todayKey()) {
+    remove(SNAPSHOT_KEY)
+    return false
+  }
+  try {
+    Object.assign(store, snapshot.store)
+    snapshot.takenSlots.forEach((s) => takenSlots.add(s))
+    snapshot.bookings.forEach((b) => bookings.set(b.id, b))
+    snapshot.registrations.forEach((r) => registrations.set(r.id, r))
+    snapshot.joinedTeams.forEach((t) => joinedTeams.add(t))
+    snapshot.registeredTournaments.forEach((t) => registeredTournaments.add(t))
+    return true
+  } catch {
+    // Snapshot rusak — mulai bersih, jangan bikin app gagal boot.
+    remove(SNAPSHOT_KEY)
+    return false
+  }
+}
+
+seed()
+// Tes selalu mulai dari seed; hanya app di peramban yang memulihkan snapshot.
+if (import.meta.env.MODE !== 'test') restoreDb()
+
+/** Mengembalikan seluruh data contoh ke keadaan awal dan membuang snapshot. */
 export function resetDb(): void {
   takenSlots.clear()
   bookings.clear()
   seed()
+  remove(SNAPSHOT_KEY)
 }

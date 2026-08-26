@@ -290,6 +290,60 @@ export interface User {
   matchesPlayed: number
 }
 
+export type SparringStatus = 'menunggu' | 'diterima' | 'ditolak'
+
+/**
+ * Ajakan sparring antar tim. Arahnya dicatat eksplisit: `masuk` perlu jawaban
+ * dari user, `keluar` sedang menunggu jawaban tim lain.
+ */
+export interface SparringInvite {
+  id: string
+  direction: 'masuk' | 'keluar'
+  fromTeamId: string
+  fromTeamName: string
+  toTeamId: string
+  toTeamName: string
+  sport: Sport
+  /** Usulan waktu main; boleh belum ditentukan. */
+  proposedAt: string | null
+  venueName: string | null
+  message: string
+  status: SparringStatus
+  createdAt: string
+}
+
+export type TournamentPaymentStatus = 'lunas' | 'menunggu'
+
+export interface TournamentRegistration {
+  id: string
+  tournamentId: string
+  tournamentName: string
+  entryFeeIdr: number
+  paymentMethod: PaymentMethod
+  paymentStatus: TournamentPaymentStatus
+  registeredAt: string
+  code: string
+}
+
+/** Preferensi yang bisa diubah user di layar Pengaturan. */
+export interface Preferences {
+  /** Notifikasi per jenis — mematikan salah satu menyembunyikannya dari daftar. */
+  notify: Record<NotificationKind, boolean>
+  /** Kota/area yang dipakai Home dan pencarian. */
+  area: string
+  /** Radius bawaan pencarian, km. */
+  defaultRadiusKm: number
+  /** Mengurangi animasi di luar setelan sistem. */
+  reduceMotion: boolean
+}
+
+export const AREAS = [
+  'Bandung Utara',
+  'Bandung Tengah',
+  'Bandung Selatan',
+  'Bandung Timur',
+] as const
+
 export interface ChatMessage {
   id: string
   chatId: string
