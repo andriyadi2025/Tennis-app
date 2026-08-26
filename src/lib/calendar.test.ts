@@ -20,7 +20,7 @@ function booking(overrides: Partial<Booking> = {}): Booking {
     splitBill: null,
     status: 'confirmed',
     paymentMethod: 'qris',
-    code: 'LPG-ABC123',
+    code: 'DBTC-ABC123',
     subtotalIdr: 156_000,
     pointsRedeemed: 0,
     discountIdr: 0,
@@ -95,7 +95,7 @@ describe('bookingToIcs', () => {
   })
 
   it('memakai kode booking sebagai UID supaya tidak menggandakan acara', () => {
-    expect(bookingToIcs(booking(), now)).toContain('UID:LPG-ABC123@lapangin.app')
+    expect(bookingToIcs(booking(), now)).toContain('UID:DBTC-ABC123@dbtc.id')
   })
 
   it('memasang pengingat satu jam sebelum main', () => {

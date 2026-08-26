@@ -69,10 +69,10 @@ export function bookingToIcs(booking: Booking, now: Date = new Date()): string {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Lapangin//Booking//ID',
+    'PRODID:-//Dukuh Bima Tennis Club//Booking//ID',
     'CALSCALE:GREGORIAN',
     'BEGIN:VEVENT',
-    `UID:${booking.code}@lapangin.app`,
+    `UID:${booking.code}@dbtc.id`,
     `DTSTAMP:${toIcsStamp(now.toISOString())}`,
     `DTSTART:${toIcsStamp(booking.range.startsAt)}`,
     `DTEND:${toIcsStamp(booking.range.endsAt)}`,
@@ -101,7 +101,7 @@ export function downloadIcs(booking: Booking): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `lapangin-${booking.code}.ics`
+  anchor.download = `dbtc-${booking.code}.ics`
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

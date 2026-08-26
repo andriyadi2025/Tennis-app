@@ -455,7 +455,7 @@ export const TEAMS: Team[] = [
 export const TOURNAMENTS: Tournament[] = [
   {
     id: 'trn-1',
-    name: 'Lapangin Cup — Badminton Ganda',
+    name: 'DBTC Open — Badminton Ganda',
     sport: 'badminton',
     venueName: 'GOR Cendana',
     city: 'Bandung',
@@ -657,7 +657,7 @@ export const NOTIFICATIONS: AppNotification[] = [
   {
     id: 'n-6',
     kind: 'community',
-    title: 'Lapangin Cup buka pendaftaran',
+    title: 'DBTC Open buka pendaftaran',
     body: 'Badminton ganda, hadiah total Rp8.000.000. Kuota 32 pasang.',
     createdAt: hoursAgo(74),
     read: true,
@@ -760,7 +760,7 @@ export const CHATS: ChatThread[] = [
         id: 'm-3',
         chatId: 'chat-om-1',
         authorId: 'system',
-        authorName: 'Lapangin',
+        authorName: 'DBTC',
         body: 'Split bill dibuat untuk booking ini.',
         sentAt: hoursAgo(4),
         splitCardBookingId: 'bk-seed-1',

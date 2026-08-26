@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { share } from './share'
 
 const payload = {
-  title: 'Booking Lapangin',
+  title: 'Booking DBTC',
   text: 'Main badminton di GOR Cendana.',
-  url: 'https://lapangin.app/booking/bk-1/ticket',
+  url: 'https://dbtc.id/booking/bk-1/ticket',
 }
 
 function stubNavigator(value: Partial<Navigator>) {

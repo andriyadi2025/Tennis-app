@@ -25,7 +25,7 @@ function bookingWithDeadline(deadline: Date): Booking {
     splitBill: null,
     status: 'awaitingPayment',
     paymentMethod: null,
-    code: 'LPG-TEST12',
+    code: 'DBTC-TEST12',
     subtotalIdr: 156_000,
     pointsRedeemed: 0,
     discountIdr: 0,

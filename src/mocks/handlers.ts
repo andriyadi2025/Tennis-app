@@ -54,7 +54,7 @@ export const PAYMENT_HOLD_MS = 10 * 60 * 1_000
 
 function bookingCode(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let out = 'LPG-'
+  let out = 'DBTC-'
   for (let i = 0; i < 6; i += 1) {
     out += alphabet[Math.floor(Math.random() * alphabet.length)]
   }
@@ -637,7 +637,7 @@ export const handlers = [
       // Bayar di tempat berarti belum lunas, dan itu harus terlihat jujur.
       paymentStatus: method === 'onsite' ? 'menunggu' : 'lunas',
       registeredAt: new Date().toISOString(),
-      code: bookingCode().replace('LPG-', 'TRN-'),
+      code: bookingCode().replace('DBTC-', 'TRN-'),
     }
     saveRegistration(registration)
     persistDb()

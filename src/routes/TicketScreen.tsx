@@ -134,7 +134,7 @@ export function TicketScreen() {
           block
           onClick={() => {
             void share({
-              title: 'Booking Lapangin',
+              title: 'Booking DBTC',
               text: `Main ${SPORT_LABEL[data.sport]} di ${data.venueName}, ${formatDateLong(
                 data.range.startsAt,
               )} ${formatHourRange(data.range.startsAt, data.range.endsAt)}. Kode ${data.code}.`,

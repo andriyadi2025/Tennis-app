@@ -1,4 +1,4 @@
-/** Cabang olahraga yang didukung Lapangin. */
+/** Cabang olahraga yang didukung DBTC. */
 export type Sport =
   'badminton' | 'futsal' | 'basketball' | 'tennis' | 'padel' | 'volleyball' | 'miniSoccer'
 

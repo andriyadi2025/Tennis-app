@@ -51,14 +51,24 @@ export function HomeScreen() {
   return (
     <Screen>
       <header className="flex items-center justify-between gap-3">
-        <div className="flex flex-col">
-          <span className="text-base text-neutral-600">
-            {greeting()}, {firstName}
-          </span>
-          <span className="flex items-center gap-1.5 font-heading text-2xl">
-            <Icon icon={MapPin} size={17} className="text-accent" />
-            {area}
-          </span>
+        <div className="flex min-w-0 items-center gap-3">
+          {/* Lambang klub — app ini milik satu klub, jadi identitasnya ikut hadir. */}
+          <img
+            src="/logo-dbtc-192.jpg"
+            alt=""
+            width={44}
+            height={44}
+            className="h-11 w-11 shrink-0 rounded-pill"
+          />
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-base text-neutral-600">
+              {greeting()}, {firstName}
+            </span>
+            <span className="flex items-center gap-1.5 font-heading text-2xl">
+              <Icon icon={MapPin} size={17} className="text-accent" />
+              {area}
+            </span>
+          </div>
         </div>
         <Link
           to="/notifications"
@@ -311,7 +321,7 @@ function CommunityHome() {
             className="h-[72px] w-[72px] shrink-0"
           />
           <div className="flex flex-1 flex-col gap-1.5">
-            <h3 className="text-xl">Lapangin Cup</h3>
+            <h3 className="text-xl">DBTC Open</h3>
             <p className="text-base text-neutral-700">Badminton ganda · GOR Cendana</p>
             <Chip tone="sage">Buka pendaftaran</Chip>
           </div>

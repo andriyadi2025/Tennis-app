@@ -21,7 +21,7 @@ const sheet = () => screen.getByRole('dialog')
 describe('TournamentsScreen — biaya daftar', () => {
   it('menampilkan biaya daftar di tombol, bukan hanya kata Daftar', async () => {
     renderTournaments()
-    const card = await cardFor(/Lapangin Cup/)
+    const card = await cardFor(/DBTC Open/)
     expect(within(card).getByRole('button', { name: /Daftar · Rp150\.000/ })).toBeInTheDocument()
   })
 
@@ -35,31 +35,31 @@ describe('TournamentsScreen — biaya daftar', () => {
     const user = userEvent.setup()
     renderTournaments()
 
-    const card = await cardFor(/Lapangin Cup/)
+    const card = await cardFor(/DBTC Open/)
     expect(within(card).getByText('24/32 peserta')).toBeInTheDocument()
 
     await user.click(within(card).getByRole('button', { name: /Daftar ·/ }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
 
     // Sheet terbuka tapi belum dibayar — kuota harus diam.
-    expect(within(await cardFor(/Lapangin Cup/)).getByText('24/32 peserta')).toBeInTheDocument()
+    expect(within(await cardFor(/DBTC Open/)).getByText('24/32 peserta')).toBeInTheDocument()
 
     await user.click(within(sheet()).getByRole('button', { name: 'Batal' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(within(await cardFor(/Lapangin Cup/)).getByText('24/32 peserta')).toBeInTheDocument()
+    expect(within(await cardFor(/DBTC Open/)).getByText('24/32 peserta')).toBeInTheDocument()
   })
 
   it('menaikkan kuota dan menandai lunas setelah bayar', async () => {
     const user = userEvent.setup()
     renderTournaments()
 
-    const card = await cardFor(/Lapangin Cup/)
+    const card = await cardFor(/DBTC Open/)
     await user.click(within(card).getByRole('button', { name: /Daftar ·/ }))
     await screen.findByRole('dialog')
     await user.click(within(sheet()).getByRole('button', { name: 'Bayar & daftar' }))
 
     expect(await screen.findByText(/Pendaftaran lunas/)).toBeInTheDocument()
-    const updated = await cardFor(/Lapangin Cup/)
+    const updated = await cardFor(/DBTC Open/)
     await waitFor(() => expect(within(updated).getByText('25/32 peserta')).toBeInTheDocument())
     expect(within(updated).getByText('Kamu sudah terdaftar')).toBeInTheDocument()
     expect(within(updated).getByText('Lunas')).toBeInTheDocument()
@@ -69,14 +69,14 @@ describe('TournamentsScreen — biaya daftar', () => {
     const user = userEvent.setup()
     renderTournaments()
 
-    const card = await cardFor(/Lapangin Cup/)
+    const card = await cardFor(/DBTC Open/)
     await user.click(within(card).getByRole('button', { name: /Daftar ·/ }))
     await screen.findByRole('dialog')
     await user.click(within(sheet()).getByRole('radio', { name: /Bayar di tempat/ }))
     await user.click(within(sheet()).getByRole('button', { name: 'Bayar & daftar' }))
 
     expect(await screen.findByText(/Bayar Rp150\.000 di lokasi/)).toBeInTheDocument()
-    const updated = await cardFor(/Lapangin Cup/)
+    const updated = await cardFor(/DBTC Open/)
     await waitFor(() => expect(within(updated).getByText('Bayar di tempat')).toBeInTheDocument())
   })
 
@@ -86,7 +86,7 @@ describe('TournamentsScreen — biaya daftar', () => {
 
     renderTournaments()
 
-    const card = await cardFor(/Lapangin Cup/)
+    const card = await cardFor(/DBTC Open/)
     expect(within(card).getByRole('button', { name: 'Kuota penuh' })).toBeDisabled()
   })
 })

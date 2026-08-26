@@ -49,7 +49,7 @@ describe('persistDb', () => {
   it('menyimpan perubahan koleksi, bukan hanya data seed', () => {
     store.tournaments[0]!.slotsTaken = 31
     persistDb()
-    const raw = window.localStorage.getItem('lapangin:mock-db') ?? ''
+    const raw = window.localStorage.getItem('dbtc:mock-db') ?? ''
     expect(raw).toContain('"slotsTaken":31')
   })
 })
@@ -68,11 +68,11 @@ describe('resetDb', () => {
 
   it('membuang snapshot supaya reload berikutnya benar-benar bersih', () => {
     persistDb()
-    expect(window.localStorage.getItem('lapangin:mock-db')).not.toBeNull()
+    expect(window.localStorage.getItem('dbtc:mock-db')).not.toBeNull()
 
     resetDb()
 
-    expect(window.localStorage.getItem('lapangin:mock-db')).toBeNull()
+    expect(window.localStorage.getItem('dbtc:mock-db')).toBeNull()
   })
 
   it('tidak menyentuh kunci milik aplikasi lain di origin yang sama', () => {

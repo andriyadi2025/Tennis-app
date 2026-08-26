@@ -23,7 +23,7 @@ describe('SettingsScreen', () => {
 
     expect(usePreferencesStore.getState().area).toBe('Bandung Selatan')
     // Kunci bernamespace — bukan mencemari localStorage origin ini.
-    expect(window.localStorage.getItem('lapangin:preferences')).toContain('Bandung Selatan')
+    expect(window.localStorage.getItem('dbtc:preferences')).toContain('Bandung Selatan')
   })
 
   it('menyimpan radius bawaan pencarian', async () => {

@@ -77,7 +77,7 @@ export function ProfileScreen() {
       <section className="flex flex-col gap-4 rounded-lg bg-accent-700 p-5 text-accent-100">
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <span className="text-base">Poin Lapangin</span>
+            <span className="text-base">Poin DBTC</span>
             <span className="font-heading text-4xl text-bg">
               {user.points.toLocaleString('id-ID')}
             </span>

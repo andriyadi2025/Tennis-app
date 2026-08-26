@@ -1,8 +1,14 @@
-# Lapangin
+# DBTC — Dukuh Bima Tennis Club
 
-Aplikasi booking lapangan olahraga + komunitas untuk pemain kasual di Indonesia.
-Mobile-first web app berbentuk Android, jalan tanpa server — seluruh backend
-disimulasikan MSW.
+Aplikasi booking lapangan olahraga + komunitas. Mobile-first web app berbentuk
+Android, jalan tanpa server — seluruh backend disimulasikan MSW.
+
+> **Catatan merek.** App ini lahir sebagai "Lapangin", sebuah marketplace
+> multi-venue lintas cabang, lalu diganti merek jadi DBTC atas permintaan.
+> Fiturnya tidak dipangkas: 18 layar dan seluruh alurnya tetap seperti semula,
+> termasuk pencarian lintas venue dan tujuh cabang olahraga. Kalau nantinya
+> app ini memang hanya untuk satu klub tenis, layar pencarian venue dan
+> pemilih cabang adalah bagian pertama yang layak dipertimbangkan ulang.
 
 ```bash
 npm install
@@ -229,7 +235,7 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm test` — 133 tes, 16 berkas.
+`npm test` — 140 tes, 17 berkas.
 
 **Unit (`src/lib/*.test.ts`)** — perhitungan harga, penukaran poin dan batas
 30%, pembulatan split bill (termasuk pembuktian bahwa jumlah seluruh bagian
@@ -266,8 +272,20 @@ Seluruh warna, radius, dan font berasal dari custom property di
 `src/styles/tokens.css`, dipetakan ke nama Tailwind di `tailwind.config.ts`.
 Tidak ada satu pun nilai heksadesimal di dalam komponen.
 
+Palet diambil dari lambang DBTC dengan menyampel pikselnya, bukan dikira-kira:
+
+| Peran       | Nilai     | Asal di lambang                       |
+| ----------- | --------- | ------------------------------------- |
+| Ground      | `#f3e7d1` | kertas krem di balik lambang          |
+| Aksen       | `#c9a03c` | cincin dalam, tipografi, bola tenis   |
+| Aksen kedua | `#26503a` | cincin luar, daun laurel, senar raket |
+
+Krem DBTC praktis identik dengan ground design system Organic yang dipakai
+sebelumnya (`#f5ead8`), jadi ganti merek hanya perlu menukar dua peran aksen —
+terracotta → emas, sage → hijau — tanpa menyentuh satu komponen pun.
+
 - Ground krem `--color-bg`, permukaan `--color-surface`
-- Aksen terracotta `--color-accent`, aksen kedua sage `--color-accent-2`
+- Aksen emas `--color-accent`, aksen kedua hijau hutan `--color-accent-2`
 - Heading Caprasimo, body Figtree
 - Tombol dan input pill 999px, kontainer `--radius-lg`
 - Ikon Lucide, `strokeWidth` 2.75 dipatok sekali di `components/ui/Icon.tsx`
@@ -275,10 +293,15 @@ Tidak ada satu pun nilai heksadesimal di dalam komponen.
 - Foto venue diwakili blok warna beraksen + bentuk bulat dekoratif yang posisinya
   deterministik dari `seed`, bukan ilustrasi SVG
 
-Token diturunkan dari design system **Organic** di project Claude Design
-"Booking Court Mobile App" (`_ds/organic-…/styles.css`), dan bingkai perangkat
-diadaptasi dari starter `android-frame.jsx` di project yang sama — dengan
-warnanya ditarik ke token Organic, bukan palet Material bawaan starter.
+Struktur ramp-nya diturunkan dari design system **Organic** di project Claude
+Design "Booking Court Mobile App" (`_ds/organic-…/styles.css`); nilainya dari
+lambang DBTC. Bingkai perangkat diadaptasi dari starter `android-frame.jsx` di
+project yang sama, dengan warnanya ditarik ke token, bukan palet Material
+bawaan starter.
+
+Aset lambang ada di `public/`: `logo-dbtc-512.jpg` (layar masuk),
+`logo-dbtc-192.jpg` (header Home & ikon iOS), `favicon-dbtc.png`, dan
+`logo-dbtc-original.jpg` sebagai sumber 1254×1254 yang tidak dikompres ulang.
 
 ### Aksesibilitas
 
@@ -313,6 +336,8 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 
 ## Yang masih mock
 
+- **Seluruh data venue.** Nama venue, alamat, tarif, dan jam buka masih data
+  contoh Bandung — bukan data DBTC. Lihat "Yang masih ditunggu dari klub".
 - **Seluruh backend.** Tidak ada server, tidak ada database. Datanya hidup di
   memori dan disalin ke localStorage peramban ini saja — tidak ada yang sampai
   ke perangkat lain, dan snapshot dibuang saat harinya berganti.
@@ -329,12 +354,21 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
   usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
 
-## Yang perlu dikirim untuk melangkah ke hi-fi sungguhan
+## Yang masih ditunggu dari klub
 
-1. **Foto venue asli** — minimal 3 per venue, rasio 4:3, untuk menggantikan
-   blok placeholder di galeri dan kartu.
-2. **Logo Lapangin** — SVG, versi terang dan gelap, plus ikon app.
-3. **Daftar harga sebenarnya** — tarif per lapangan per venue, aturan prime
-   time yang benar, biaya layanan, dan harga add-on.
-4. Opsional tapi berguna: daftar venue nyata beserta alamat dan jam buka,
-   ketentuan pembatalan, dan aturan poin loyalitas yang sudah disepakati bisnis.
+Logo sudah masuk dan sudah terpasang. Tiga hal berikut sudah dijanjikan tapi
+belum ada, jadi datanya masih memakai contoh Bandung bawaan:
+
+1. **Jumlah & nama lapangan DBTC** — berapa lapangan, namanya apa, indoor atau
+   outdoor, jenis permukaannya. Menggantikan `VENUES` di `src/mocks/seed.ts`.
+2. **Tarif & iuran** — sewa per jam untuk anggota dan non-anggota, aturan prime
+   time yang benar, dan besaran iuran keanggotaan.
+3. **Jam buka & lokasi** — jam operasional, alamat, dan area, untuk mengganti
+   `openHours`, `address`, dan daftar `AREAS`.
+
+Sampai itu tiba, seluruh venue, harga, dan alamat di app adalah karangan yang
+masuk akal — bukan data DBTC. Jangan dipakai untuk keputusan apa pun.
+
+Masih berguna kalau ada: **foto lapangan asli** (minimal 3, rasio 4:3) untuk
+menggantikan blok warna placeholder, ketentuan pembatalan, dan aturan poin
+loyalitas yang sudah disepakati.

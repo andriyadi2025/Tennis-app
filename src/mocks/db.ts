@@ -256,7 +256,7 @@ function seedBooking(): Booking {
     },
     status: 'confirmed',
     paymentMethod: 'qris',
-    code: 'LPG-K7M4XQ',
+    code: 'DBTC-K7M4XQ',
     subtotalIdr: 156_000,
     pointsRedeemed: 0,
     discountIdr: 0,

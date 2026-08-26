@@ -50,15 +50,19 @@ export function LoginScreen() {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg">
       <div className="scroll-area flex flex-1 flex-col gap-8 px-6 pb-6 pt-10">
-        {/* Blok bentuk bulat sebagai grafis pembuka — bukan ilustrasi. */}
-        <div aria-hidden className="relative h-40 shrink-0">
-          <span className="absolute left-0 top-2 h-32 w-32 rounded-pill bg-accent-300" />
-          <span className="absolute left-20 top-10 h-24 w-24 rounded-pill bg-accent2-300 opacity-90" />
-          <span className="absolute left-40 top-0 h-16 w-16 rounded-pill bg-accent-200" />
+        {/* Lambang klub sebagai grafis pembuka — sumbernya logo asli DBTC. */}
+        <div className="flex shrink-0 justify-center pt-2">
+          <img
+            src="/logo-dbtc-512.jpg"
+            alt="Lambang Dukuh Bima Tennis Club"
+            width={176}
+            height={176}
+            className="h-44 w-44 rounded-pill"
+          />
         </div>
 
-        <div className="flex flex-col gap-3">
-          <h1 className="text-4xl">Lapangin</h1>
+        <div className="flex flex-col gap-3 text-center">
+          <h1 className="text-4xl">Dukuh Bima</h1>
           <p className="text-lg text-neutral-700">
             Booking lapangan, cari lawan, main bareng. Semua dari satu app.
           </p>
@@ -105,7 +109,7 @@ export function LoginScreen() {
             Masuk dengan akun demo
           </Button>
           <p className="px-2 text-center text-sm text-neutral-600">
-            Dengan lanjut, kamu setuju pada Syarat Layanan dan Kebijakan Privasi Lapangin.
+            Dengan lanjut, kamu setuju pada Syarat Layanan dan Kebijakan Privasi DBTC.
           </p>
         </div>
       </div>
