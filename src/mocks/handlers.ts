@@ -14,7 +14,7 @@ import { computePrice } from '@/lib/pricing'
 import { toRange } from '@/lib/slots'
 import { addWeeks, parseISO } from '@/lib/dates'
 import {
-  READ_ONLY,
+  store,
   buildSlots,
   claimSlots,
   findCourt,
@@ -23,6 +23,8 @@ import {
   isCursedSlot,
   isSlotAvailable,
   listBookings,
+  membership,
+  recomputeVenueRating,
   saveBooking,
 } from './db'
 import { CURRENT_USER } from './seed'
@@ -140,7 +142,7 @@ export const handlers = [
     if (filters.q.trim().toLowerCase() === 'error') {
       return HttpResponse.json({ message: 'Server sedang sibuk. Coba lagi.' }, { status: 500 })
     }
-    const results = READ_ONLY.venues
+    const results = store.venues
       .filter((v) => matches(v, filters))
       .sort((a, b) => a.distanceKm - b.distanceKm)
     return HttpResponse.json(results)
@@ -156,7 +158,7 @@ export const handlers = [
   http.get('/api/venues/:id/reviews', async ({ params }) => {
     await latency()
     const venueId = String(params.id)
-    const reviews = READ_ONLY.reviews
+    const reviews = store.reviews
       .filter((r) => r.venueId === venueId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     return HttpResponse.json({ reviews, summary: summarise(reviews) })
@@ -350,9 +352,7 @@ export const handlers = [
     await latency()
     const url = new URL(request.url)
     const sport = url.searchParams.get('sport') as Sport | null
-    const list = sport
-      ? READ_ONLY.openMatches.filter((m) => m.sport === sport)
-      : READ_ONLY.openMatches
+    const list = sport ? store.openMatches.filter((m) => m.sport === sport) : store.openMatches
     return HttpResponse.json(
       [...list].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()),
     )
@@ -360,7 +360,7 @@ export const handlers = [
 
   http.get('/api/open-matches/:id', async ({ params }) => {
     await latency()
-    const match = READ_ONLY.openMatches.find((m) => m.id === String(params.id))
+    const match = store.openMatches.find((m) => m.id === String(params.id))
     if (!match)
       return HttpResponse.json({ message: 'Open match tidak ditemukan.' }, { status: 404 })
     return HttpResponse.json(match)
@@ -368,24 +368,24 @@ export const handlers = [
 
   http.get('/api/tournaments', async () => {
     await latency()
-    return HttpResponse.json(READ_ONLY.tournaments)
+    return HttpResponse.json(store.tournaments)
   }),
 
   http.get('/api/teams', async () => {
     await latency()
-    return HttpResponse.json(READ_ONLY.teams)
+    return HttpResponse.json(store.teams)
   }),
 
   http.get('/api/teams/:id', async ({ params }) => {
     await latency()
-    const team = READ_ONLY.teams.find((t) => t.id === String(params.id))
+    const team = store.teams.find((t) => t.id === String(params.id))
     if (!team) return HttpResponse.json({ message: 'Tim tidak ditemukan.' }, { status: 404 })
     return HttpResponse.json(team)
   }),
 
   http.get('/api/notifications', async () => {
     await latency()
-    const list: AppNotification[] = [...READ_ONLY.notifications].sort(
+    const list: AppNotification[] = [...store.notifications].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
     return HttpResponse.json(list)
@@ -393,14 +393,14 @@ export const handlers = [
 
   http.get('/api/chats/:id', async ({ params }) => {
     await latency()
-    const chat = READ_ONLY.chats.find((c) => c.id === String(params.id))
+    const chat = store.chats.find((c) => c.id === String(params.id))
     if (!chat) return HttpResponse.json({ message: 'Obrolan tidak ditemukan.' }, { status: 404 })
     return HttpResponse.json(chat)
   }),
 
   http.post('/api/chats/:id/messages', async ({ params, request }) => {
     await latency()
-    const chat = READ_ONLY.chats.find((c) => c.id === String(params.id))
+    const chat = store.chats.find((c) => c.id === String(params.id))
     if (!chat) return HttpResponse.json({ message: 'Obrolan tidak ditemukan.' }, { status: 404 })
     const body = (await request.json()) as { body: string }
     const message: ChatMessage = {
@@ -413,5 +413,172 @@ export const handlers = [
     }
     chat.messages.push(message)
     return HttpResponse.json(message, { status: 201 })
+  }),
+
+  /* ── Aksi komunitas ──────────────────────────────────────────────────── */
+
+  /** Gabung open match. Menolak kalau slot sudah habis atau sudah gabung. */
+  http.post('/api/open-matches/:id/join', async ({ params }) => {
+    await latency()
+    const match = store.openMatches.find((m) => m.id === String(params.id))
+    if (!match)
+      return HttpResponse.json({ message: 'Open match tidak ditemukan.' }, { status: 404 })
+
+    if (match.players.some((p) => p.id === CURRENT_USER.id)) {
+      return HttpResponse.json(
+        { code: 'ALREADY_JOINED', message: 'Kamu sudah gabung di sesi ini.' },
+        { status: 409 },
+      )
+    }
+    if (match.players.length >= match.slotsTotal) {
+      return HttpResponse.json(
+        { code: 'MATCH_FULL', message: 'Yah, slotnya baru saja penuh.' },
+        { status: 409 },
+      )
+    }
+
+    match.players.push({
+      id: CURRENT_USER.id,
+      name: CURRENT_USER.name.split(' ')[0] ?? CURRENT_USER.name,
+      level: 'menengah',
+    })
+    return HttpResponse.json(match)
+  }),
+
+  http.post('/api/open-matches/:id/leave', async ({ params }) => {
+    await latency()
+    const match = store.openMatches.find((m) => m.id === String(params.id))
+    if (!match)
+      return HttpResponse.json({ message: 'Open match tidak ditemukan.' }, { status: 404 })
+    match.players = match.players.filter((p) => p.id !== CURRENT_USER.id)
+    return HttpResponse.json(match)
+  }),
+
+  http.post('/api/notifications/:id/read', async ({ params }) => {
+    await latency()
+    const item = store.notifications.find((n) => n.id === String(params.id))
+    if (!item) return HttpResponse.json({ message: 'Notifikasi tidak ditemukan.' }, { status: 404 })
+    item.read = true
+    return HttpResponse.json(item)
+  }),
+
+  http.post('/api/notifications/read-all', async () => {
+    await latency()
+    store.notifications.forEach((n) => {
+      n.read = true
+    })
+    return HttpResponse.json(store.notifications)
+  }),
+
+  /** Tulis ulasan. Rating venue ikut dihitung ulang agar tidak kontradiktif. */
+  http.post('/api/venues/:id/reviews', async ({ params, request }) => {
+    await latency()
+    const venueId = String(params.id)
+    if (!findVenue(venueId)) {
+      return HttpResponse.json({ message: 'Venue tidak ditemukan.' }, { status: 404 })
+    }
+    const body = (await request.json()) as { rating: number; body: string }
+    const rating = Math.round(body.rating)
+    if (rating < 1 || rating > 5) {
+      return HttpResponse.json({ message: 'Rating harus 1–5 bintang.' }, { status: 422 })
+    }
+    if (body.body.trim().length < 10) {
+      return HttpResponse.json(
+        { message: 'Ceritakan sedikit lebih panjang, minimal 10 karakter.' },
+        { status: 422 },
+      )
+    }
+
+    const review: Review = {
+      id: `r-${Date.now().toString(36)}`,
+      venueId,
+      authorName: CURRENT_USER.name,
+      rating,
+      createdAt: new Date().toISOString(),
+      body: body.body.trim(),
+      tags: [],
+    }
+    store.reviews.unshift(review)
+    recomputeVenueRating(venueId)
+    return HttpResponse.json(review, { status: 201 })
+  }),
+
+  http.post('/api/teams/:id/join', async ({ params }) => {
+    await latency()
+    const team = store.teams.find((t) => t.id === String(params.id))
+    if (!team) return HttpResponse.json({ message: 'Tim tidak ditemukan.' }, { status: 404 })
+    if (membership.hasJoinedTeam(team.id)) {
+      return HttpResponse.json(
+        { code: 'ALREADY_JOINED', message: 'Kamu sudah jadi anggota tim ini.' },
+        { status: 409 },
+      )
+    }
+    membership.joinTeam(team.id)
+    team.memberCount += 1
+    team.members.push({
+      id: CURRENT_USER.id,
+      name: CURRENT_USER.name.split(' ')[0] ?? CURRENT_USER.name,
+      level: 'menengah',
+    })
+    return HttpResponse.json(team)
+  }),
+
+  /** Ajakan sparring — dicatat sebagai notifikasi, belum ada inbox terpisah. */
+  http.post('/api/teams/:id/spar', async ({ params }) => {
+    await latency()
+    const team = store.teams.find((t) => t.id === String(params.id))
+    if (!team) return HttpResponse.json({ message: 'Tim tidak ditemukan.' }, { status: 404 })
+    const notification: AppNotification = {
+      id: `n-${Date.now().toString(36)}`,
+      kind: 'match',
+      title: `Ajakan sparring terkirim ke ${team.name}`,
+      body: 'Kami kabari begitu mereka membalas.',
+      createdAt: new Date().toISOString(),
+      read: false,
+      href: `/team/${team.id}`,
+    }
+    store.notifications.unshift(notification)
+    return HttpResponse.json(notification, { status: 201 })
+  }),
+
+  http.post('/api/tournaments/:id/register', async ({ params }) => {
+    await latency()
+    const tournament = store.tournaments.find((t) => t.id === String(params.id))
+    if (!tournament) {
+      return HttpResponse.json({ message: 'Turnamen tidak ditemukan.' }, { status: 404 })
+    }
+    if (membership.hasRegistered(tournament.id)) {
+      return HttpResponse.json(
+        { code: 'ALREADY_REGISTERED', message: 'Kamu sudah terdaftar di turnamen ini.' },
+        { status: 409 },
+      )
+    }
+    if (tournament.status !== 'pendaftaran') {
+      return HttpResponse.json(
+        { code: 'CLOSED', message: 'Pendaftaran turnamen ini sudah ditutup.' },
+        { status: 409 },
+      )
+    }
+    if (tournament.slotsTaken >= tournament.slotsTotal) {
+      return HttpResponse.json(
+        { code: 'FULL', message: 'Kuota peserta sudah penuh.' },
+        { status: 409 },
+      )
+    }
+    membership.register(tournament.id)
+    tournament.slotsTaken += 1
+    return HttpResponse.json(tournament)
+  }),
+
+  /** Dipakai UI untuk tahu apa yang sudah diikuti user tanpa menebak. */
+  http.get('/api/memberships', async () => {
+    await latency()
+    return HttpResponse.json({
+      teams: store.teams.filter((t) => membership.hasJoinedTeam(t.id)).map((t) => t.id),
+      tournaments: store.tournaments.filter((t) => membership.hasRegistered(t.id)).map((t) => t.id),
+      openMatches: store.openMatches
+        .filter((m) => m.players.some((p) => p.id === CURRENT_USER.id))
+        .map((m) => m.id),
+    })
   }),
 ]

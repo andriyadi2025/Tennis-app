@@ -1,4 +1,15 @@
-import type { Booking, Court, Slot, Venue } from '@/types'
+import type {
+  AppNotification,
+  Booking,
+  ChatThread,
+  Court,
+  OpenMatch,
+  Review,
+  Slot,
+  Team,
+  Tournament,
+  Venue,
+} from '@/types'
 import { CHATS, NOTIFICATIONS, OPEN_MATCHES, REVIEWS, TEAMS, TOURNAMENTS, VENUES } from './seed'
 
 /**
@@ -78,7 +89,7 @@ export function buildSlots(venue: Venue, court: Court, dayIso: string): Slot[] {
 }
 
 export function findVenue(id: string): Venue | undefined {
-  return VENUES.find((v) => v.id === id)
+  return store.venues.find((v) => v.id === id)
 }
 
 export function findCourt(venue: Venue, courtId: string): Court | undefined {
@@ -118,14 +129,59 @@ export function isCursedSlot(courtId: string, startsAt: readonly string[]): bool
   return startsAt.some((iso) => new Date(iso).getHours() === 21)
 }
 
-export const READ_ONLY = {
-  venues: VENUES,
-  reviews: REVIEWS,
-  openMatches: OPEN_MATCHES,
-  teams: TEAMS,
-  tournaments: TOURNAMENTS,
-  notifications: NOTIFICATIONS,
-  chats: CHATS,
+/**
+ * Koleksi yang bisa berubah selama sesi: gabung open match, tandai notifikasi
+ * dibaca, tulis ulasan, daftar turnamen. Isinya salinan dari `seed.ts`, bukan
+ * array seed itu sendiri — kalau seed dimutasi langsung, `resetDb()` tidak
+ * akan pernah benar-benar mengembalikan keadaan awal dan tes akan saling
+ * mencemari lewat state modul.
+ */
+export const store = {
+  venues: [] as Venue[],
+  reviews: [] as Review[],
+  openMatches: [] as OpenMatch[],
+  teams: [] as Team[],
+  tournaments: [] as Tournament[],
+  notifications: [] as AppNotification[],
+  chats: [] as ChatThread[],
+}
+
+/** Tim dan turnamen yang sudah diikuti user di sesi ini. */
+const joinedTeams = new Set<string>()
+const registeredTournaments = new Set<string>()
+
+export const membership = {
+  hasJoinedTeam: (id: string) => joinedTeams.has(id),
+  joinTeam: (id: string) => joinedTeams.add(id),
+  hasRegistered: (id: string) => registeredTournaments.has(id),
+  register: (id: string) => registeredTournaments.add(id),
+}
+
+function loadCollections(): void {
+  store.venues = structuredClone(VENUES)
+  store.reviews = structuredClone(REVIEWS)
+  store.openMatches = structuredClone(OPEN_MATCHES)
+  store.teams = structuredClone(TEAMS)
+  store.tournaments = structuredClone(TOURNAMENTS)
+  store.notifications = structuredClone(NOTIFICATIONS)
+  store.chats = structuredClone(CHATS)
+  joinedTeams.clear()
+  registeredTournaments.clear()
+}
+
+/**
+ * Rating venue dihitung ulang dari ulasan yang benar-benar ada, supaya angka
+ * di kartu venue tidak bertentangan dengan daftar ulasannya sendiri setelah
+ * user menambah ulasan baru.
+ */
+export function recomputeVenueRating(venueId: string): void {
+  const venue = store.venues.find((v) => v.id === venueId)
+  if (!venue) return
+  const own = store.reviews.filter((r) => r.venueId === venueId)
+  if (own.length === 0) return
+  const average = own.reduce((sum, r) => sum + r.rating, 0) / own.length
+  venue.rating = Math.round(average * 10) / 10
+  venue.reviewCount = own.length
 }
 
 /**
@@ -134,7 +190,7 @@ export const READ_ONLY = {
  * untuk ditampilkan sampai user menyelesaikan satu booking sendiri.
  */
 function seedBooking(): Booking {
-  const venue = VENUES[0]!
+  const venue = store.venues[0]!
   const court = venue.courts[2]!
   const starts = new Date()
   starts.setDate(starts.getDate() + ((5 - starts.getDay() + 7) % 7 || 7))
@@ -183,6 +239,7 @@ function seedBooking(): Booking {
 }
 
 function seed(): void {
+  loadCollections()
   const booking = seedBooking()
   bookings.set(booking.id, booking)
   claimSlots(booking.courtId, [
