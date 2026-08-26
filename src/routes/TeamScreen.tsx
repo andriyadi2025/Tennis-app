@@ -1,5 +1,6 @@
-import { useParams } from 'react-router-dom'
-import { CalendarPlus, MapPin, Send, Swords } from 'lucide-react'
+import { Link, useParams } from 'react-router-dom'
+import { CalendarPlus, ChevronRight, MapPin, Send, Swords } from 'lucide-react'
+import type { Sport } from '@/types'
 import { LEVEL_LABEL, SPORT_LABEL } from '@/types'
 import { useJoinTeam, useMemberships, useRequestSparring, useTeam, useTeams } from '@/hooks/queries'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
@@ -10,6 +11,17 @@ import { ErrorState, RowSkeleton, SkeletonBlock } from '@/components/ui/states'
 import { Toast } from '@/components/ui/Toast'
 import { useToast } from '@/hooks/useToast'
 import { TeamCard } from '@/components/domain/cards'
+
+/** Venue latihan bawaan per cabang — pintasan menuju slot picker. */
+const TRAINING_VENUE: Record<Sport, string> = {
+  badminton: 'v-cendana',
+  futsal: 'v-arenabuahbatu',
+  basketball: 'v-sabuga',
+  tennis: 'v-tenispajajaran',
+  padel: 'v-padelkita',
+  volleyball: 'v-sabuga',
+  miniSoccer: 'v-minisoccersetiabudi',
+}
 
 /** 16 · Tim & komunitas. */
 export function TeamScreen() {
@@ -76,7 +88,7 @@ export function TeamScreen() {
           disabled={spar.isPending}
           onClick={() =>
             spar.mutate(undefined, {
-              onSuccess: () => show(`Ajakan sparring terkirim ke ${data.name}.`),
+              onSuccess: () => show('Ajakan terkirim. Lihat statusnya di Ajakan sparring.'),
               onError: (error) => show(error.message, 'gagal'),
             })
           }
@@ -126,7 +138,11 @@ export function TeamScreen() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-3xl">Jadwal latihan</h2>
-        <div className="flex items-center gap-3.5 rounded-lg bg-surface p-4">
+        {/* Menuju slot picker; toggle "ulangi tiap minggu" ada di sana. */}
+        <Link
+          to={`/venue/${TRAINING_VENUE[data.sport]}/schedule`}
+          className="flex items-center gap-3.5 rounded-lg bg-surface p-4"
+        >
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-pill bg-accent2-300 text-accent2-800">
             <Icon icon={CalendarPlus} size={20} />
           </span>
@@ -136,7 +152,8 @@ export function TeamScreen() {
               Kunci slot mingguan untuk seluruh anggota sekaligus.
             </span>
           </div>
-        </div>
+          <Icon icon={ChevronRight} size={17} className="text-neutral-600" />
+        </Link>
       </section>
 
       <section className="flex flex-col gap-3">

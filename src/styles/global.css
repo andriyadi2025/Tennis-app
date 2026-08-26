@@ -102,4 +102,14 @@
       animation: none;
     }
   }
+
+  /* Setelan app, terpisah dari setelan sistem: user boleh menenangkan
+     animasi di sini tanpa mengubah preferensi seluruh perangkatnya. */
+  :root[data-reduce-motion] .skeleton {
+    animation: none;
+  }
+  :root[data-reduce-motion] * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

@@ -1,10 +1,12 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import type { Sport } from '@/types'
 import { SPORTS, SPORT_LABEL } from '@/types'
-import { useOpenMatches, useTeams } from '@/hooks/queries'
+import { useOpenMatches, useSparring, useTeams } from '@/hooks/queries'
 import { Screen, SectionHeading } from '@/components/layout/Screen'
+import { Swords } from 'lucide-react'
 import { LinkButton } from '@/components/ui/Button'
-import { ToggleChip } from '@/components/ui/primitives'
+import { Icon } from '@/components/ui/Icon'
+import { Chip, ToggleChip } from '@/components/ui/primitives'
 import { AsyncList, EmptyState, ListSkeleton, RowSkeleton } from '@/components/ui/states'
 import { OpenMatchCard, TeamCard } from '@/components/domain/cards'
 
@@ -16,6 +18,10 @@ export function MatchScreen() {
 
   const matches = useOpenMatches(sport)
   const teams = useTeams()
+  const sparring = useSparring()
+  const waiting = (sparring.data ?? []).filter(
+    (s) => s.direction === 'masuk' && s.status === 'menunggu',
+  ).length
 
   function setSport(next: Sport | null) {
     const search = new URLSearchParams(params)
@@ -37,6 +43,22 @@ export function MatchScreen() {
       <p className="text-base text-neutral-700">
         Gabung open match yang kurang orang, atau ajak tim lain sparring.
       </p>
+
+      <Link
+        to="/sparring"
+        className="flex min-h-touch items-center gap-3.5 rounded-lg bg-surface px-4 py-3"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill bg-accent2-200 text-accent2-800">
+          <Icon icon={Swords} size={18} />
+        </span>
+        <span className="flex flex-1 flex-col">
+          <span className="text-base font-bold">Ajakan sparring</span>
+          <span className="text-sm text-neutral-700">
+            {waiting > 0 ? `${waiting} ajakan menunggu jawaban` : 'Tidak ada yang menunggu'}
+          </span>
+        </span>
+        {waiting > 0 && <Chip tone="accent">{waiting}</Chip>}
+      </Link>
 
       <div className="row-scroll -mx-5 flex gap-2 px-5">
         <ToggleChip active={sport === null} onClick={() => setSport(null)}>

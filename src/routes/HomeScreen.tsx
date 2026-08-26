@@ -5,6 +5,7 @@ import type { Sport } from '@/types'
 import { SPORTS, SPORT_LABEL } from '@/types'
 import { useMe, useNotifications, useOpenMatches, useVenues } from '@/hooks/queries'
 import { useAuthStore } from '@/store/auth'
+import { usePreferencesStore } from '@/store/preferences'
 import { formatHour } from '@/lib/dates'
 import { Screen, SectionHeading } from '@/components/layout/Screen'
 import { Icon } from '@/components/ui/Icon'
@@ -42,6 +43,7 @@ export function HomeScreen() {
   const storedUser = useAuthStore((s) => s.user)
   const { data: me } = useMe()
   const user = me ?? storedUser
+  const area = usePreferencesStore((s) => s.area)
   const notifications = useNotifications()
   const unread = (notifications.data ?? []).filter((n) => !n.read).length
   const firstName = (user?.name ?? '').split(' ')[0] ?? ''
@@ -55,7 +57,7 @@ export function HomeScreen() {
           </span>
           <span className="flex items-center gap-1.5 font-heading text-2xl">
             <Icon icon={MapPin} size={17} className="text-accent" />
-            Bandung Utara
+            {area}
           </span>
         </div>
         <Link

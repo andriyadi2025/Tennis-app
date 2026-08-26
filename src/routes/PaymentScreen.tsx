@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
-import { Banknote, Building2, CreditCard, QrCode, Smartphone } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { QrCode } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 import { PAYMENT_LABEL } from '@/types'
 import { useBooking, usePayBooking } from '@/hooks/queries'
@@ -15,14 +14,7 @@ import { Screen, ScreenHeader, StickyBar } from '@/components/layout/Screen'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
-
-const METHODS: { id: PaymentMethod; icon: LucideIcon; note: string }[] = [
-  { id: 'qris', icon: QrCode, note: 'Scan pakai app bank atau e-wallet apa pun' },
-  { id: 'ewallet', icon: Smartphone, note: 'GoPay, OVO, DANA, ShopeePay' },
-  { id: 'va', icon: Building2, note: 'BCA, Mandiri, BNI, BRI' },
-  { id: 'card', icon: CreditCard, note: 'Visa, Mastercard' },
-  { id: 'onsite', icon: Banknote, note: 'Bayar tunai saat datang — slot tetap dikunci' },
-]
+import { PaymentMethodPicker } from '@/components/domain/PaymentMethodPicker'
 
 /**
  * Hitung mundur hold pembayaran. Sumber kebenarannya deadline dari server,
@@ -175,53 +167,12 @@ export function PaymentScreen() {
       {/* Metode pembayaran */}
       <section className="flex flex-col gap-3">
         <h2 className="text-3xl">Metode pembayaran</h2>
-        <fieldset className="flex flex-col gap-2.5" disabled={expired}>
-          <legend className="sr-only">Pilih metode pembayaran</legend>
-          {METHODS.map(({ id, icon, note }) => {
-            const active = method === id
-            return (
-              <label
-                key={id}
-                className={clsx(
-                  'flex min-h-touch cursor-pointer items-center gap-3.5 rounded-lg px-4 py-3.5 transition-colors',
-                  active ? 'bg-accent-100 ring-2 ring-accent' : 'bg-surface',
-                  expired && 'opacity-50',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="payment-method"
-                  value={id}
-                  checked={active}
-                  onChange={() => setMethod(id)}
-                  className="sr-only"
-                />
-                <span
-                  aria-hidden
-                  className={clsx(
-                    'flex h-11 w-11 shrink-0 items-center justify-center rounded-pill',
-                    active ? 'bg-accent text-bg' : 'bg-neutral-200 text-neutral-800',
-                  )}
-                >
-                  <Icon icon={icon} size={20} />
-                </span>
-                <span className="flex flex-1 flex-col">
-                  <span className="text-md font-bold">{PAYMENT_LABEL[id]}</span>
-                  <span className="text-sm text-neutral-700">{note}</span>
-                </span>
-                <span
-                  aria-hidden
-                  className={clsx(
-                    'h-5 w-5 shrink-0 rounded-pill border-2',
-                    active
-                      ? 'border-accent bg-accent ring-4 ring-inset ring-bg'
-                      : 'border-neutral-400',
-                  )}
-                />
-              </label>
-            )
-          })}
-        </fieldset>
+        <PaymentMethodPicker
+          name="booking-payment"
+          value={method}
+          onChange={setMethod}
+          disabled={expired}
+        />
       </section>
 
       {method === 'qris' && !expired && (

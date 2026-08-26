@@ -3,6 +3,7 @@ import { Search, SlidersHorizontal, X } from 'lucide-react'
 import { SPORTS, SPORT_LABEL } from '@/types'
 import { useVenues } from '@/hooks/queries'
 import { DEFAULT_FILTERS, useDebounced, useSearchFilters } from '@/hooks/useSearchFilters'
+import { usePreferencesStore } from '@/store/preferences'
 import { formatIdrShort } from '@/lib/money'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +18,7 @@ const DISTANCE_STEPS = [2, 5, 10, 20]
 /** 03 · Cari & filter. Semua filter tersimpan di URL. */
 export function SearchScreen() {
   const { filters, setFilters, reset, activeCount } = useSearchFilters()
+  const preferredRadius = usePreferencesStore((s) => s.defaultRadiusKm)
   const [panelOpen, setPanelOpen] = useState(false)
   const [query, setQuery] = useState(filters.q)
   const debouncedQuery = useDebounced(query)
@@ -145,7 +147,7 @@ export function SearchScreen() {
           {filters.maxPrice !== DEFAULT_FILTERS.maxPrice && (
             <Chip tone="accent">≤ {formatIdrShort(filters.maxPrice)}/jam</Chip>
           )}
-          {filters.maxDistance !== DEFAULT_FILTERS.maxDistance && (
+          {filters.maxDistance !== preferredRadius && (
             <Chip tone="accent">≤ {filters.maxDistance} km</Chip>
           )}
           {filters.indoorOnly && <Chip tone="sage">Indoor</Chip>}

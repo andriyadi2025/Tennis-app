@@ -7,6 +7,7 @@ import {
   useMarkNotificationRead,
   useNotifications,
 } from '@/hooks/queries'
+import { usePreferencesStore } from '@/store/preferences'
 import { formatRelative } from '@/lib/dates'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Icon } from '@/components/ui/Icon'
@@ -60,7 +61,12 @@ export function NotificationsScreen() {
   const markRead = useMarkNotificationRead()
   const markAllRead = useMarkAllNotificationsRead()
 
-  const unread = (notifications.data ?? []).filter((n) => !n.read).length
+  const notify = usePreferencesStore((s) => s.notify)
+
+  // Jenis yang dimatikan di Pengaturan benar-benar hilang dari daftar,
+  // bukan sekadar berhenti berbunyi.
+  const visible = (notifications.data ?? []).filter((n) => notify[n.kind])
+  const unread = visible.filter((n) => !n.read).length
 
   return (
     <Screen>
@@ -83,13 +89,17 @@ export function NotificationsScreen() {
       <AsyncList
         isLoading={notifications.isLoading}
         error={notifications.error}
-        data={notifications.data}
+        data={visible}
         onRetry={() => void notifications.refetch()}
         skeleton={<RowSkeleton count={5} />}
         empty={
           <EmptyState
             title="Belum ada notifikasi"
-            body="Kabar booking, open match, dan split bill akan muncul di sini."
+            body={
+              (notifications.data ?? []).length > 0
+                ? 'Semua jenis notifikasi sedang dimatikan di Pengaturan.'
+                : 'Kabar booking, open match, dan split bill akan muncul di sini.'
+            }
           />
         }
       >

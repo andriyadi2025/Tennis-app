@@ -63,6 +63,8 @@ src/
 │  ├─ slots.ts             pilihan harus bersambung; deteksi bentrok berulang
 │  ├─ dates.ts             format Indonesia (date-fns locale id)
 │  ├─ money.ts             Rp145.000 / Rp65rb (Intl id-ID)
+│  ├─ calendar.ts          pembangun berkas .ics (escaping + lipatan per oktet)
+│  ├─ share.ts             Web Share API dengan jalur mundur papan klip
 │  ├─ api.ts               pembungkus fetch + ApiError bertipe
 │  └─ storage.ts           localStorage bernamespace `lapangin:`
 ├─ mocks/
@@ -72,7 +74,8 @@ src/
 │  └─ browser.ts server.ts transport MSW untuk app dan untuk tes
 ├─ store/
 │  ├─ auth.ts              user + token, tersimpan di localStorage
-│  └─ draft.ts             state machine alur booking
+│  ├─ draft.ts             state machine alur booking
+│  └─ preferences.ts      area, radius, notifikasi per jenis, kurangi animasi
 ├─ hooks/
 │  ├─ queries.ts           seluruh hook TanStack Query
 │  └─ useSearchFilters.ts  filter pencarian yang hidup di URL
@@ -80,7 +83,7 @@ src/
 │  ├─ ui/                  Button, Icon, primitives, states (skeleton/empty/error)
 │  ├─ layout/              AndroidFrame, Screen, BottomNav
 │  └─ domain/              kartu venue/open match/turnamen/tim, ikon cabang
-├─ routes/                 18 layar
+├─ routes/                 18 layar brief + Pengaturan & kotak ajakan sparring
 └─ styles/
    ├─ tokens.css           satu-satunya tempat nilai warna mentah boleh ada
    └─ global.css           reset + utilitas
@@ -168,14 +171,36 @@ sparring muncul sebagai notifikasi baru.
 
 **Notifikasi.** Bisa ditandai dibaca satu per satu atau sekaligus, dan titik
 merah di Home menghitung yang benar-benar belum dibaca — bukan hiasan tetap.
+Jenis yang dimatikan di Pengaturan benar-benar hilang dari daftar.
+
+**Ajakan sparring.** Punya kotak sendiri dengan dua sisi: yang masuk butuh
+jawaban (terima/tolak), yang terkirim menunggu jawaban tim lain. Menjawab
+memunculkan notifikasi dan, kalau diterima, pintasan untuk langsung booking
+lapangannya.
+
+**Biaya daftar turnamen.** Kuota baru bergerak setelah biaya dibayar — mendaftar
+dan membayar bukan dua hal terpisah. "Bayar di tempat" menghasilkan pendaftaran
+berstatus _menunggu_, bukan _lunas_, dan bedanya terlihat di kartu.
+
+**Pengaturan.** Area, radius bawaan pencarian, notifikasi per jenis, dan
+"kurangi animasi" — semuanya tersimpan lokal dan langsung berpengaruh:
+area mengubah header Home, radius jadi bawaan filter pencarian, dan kurangi
+animasi memasang `data-reduce-motion` di root dokumen sehingga satu aturan CSS
+menjinakkan seluruh transisi sekaligus.
 
 **Ulasan.** Bisa ditulis dari layar ulasan. Rating venue dihitung ulang dari
 ulasan yang benar-benar ada, supaya angka di kartu venue tidak pernah
 bertentangan dengan daftar ulasannya sendiri.
 
-**Persistensi.** Auth dan draft booking disimpan di localStorage dengan prefiks
-`lapangin:`. `clearAll()` hanya menghapus kunci berprefiks itu — kunci milik
-aplikasi lain di origin yang sama tidak pernah disentuh.
+**Persistensi.** Auth, draft booking, preferensi, dan seluruh isi backend
+tiruan disimpan di localStorage dengan prefiks `lapangin:`. Booking, ulasan,
+ajakan, dan pendaftaran turnamen bertahan melewati reload halaman.
+
+Snapshot membawa nomor versi dan stempel tanggal. Data contoh dibuat relatif
+terhadap "hari ini", jadi snapshot dari hari lain dibuang alih-alih dipulihkan —
+tanpa itu app akan menampilkan jadwal kemarin sebagai jadwal hari ini. Pengaturan
+punya tombol reset yang mengembalikan semuanya ke keadaan awal, dan penghapusan
+hanya menyentuh kunci berprefiks `lapangin:`.
 
 ---
 
@@ -204,20 +229,23 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm test` — 106 tes, 12 berkas.
+`npm test` — 133 tes, 16 berkas.
 
 **Unit (`src/lib/*.test.ts`)** — perhitungan harga, penukaran poin dan batas
 30%, pembulatan split bill (termasuk pembuktian bahwa jumlah seluruh bagian
 sama persis dengan total), validasi slot bersambung, deteksi bentrok berulang,
-pembangunan berkas .ics (escaping, lipatan baris per oktet, RRULE), dan jalur
-mundur berbagi.
+pembangunan berkas .ics (escaping, lipatan baris per oktet, RRULE), jalur mundur
+berbagi, dan lapisan data tiruan (determinisme ketersediaan slot, snapshot, dan
+reset yang tidak menyentuh kunci aplikasi lain).
 
 **Komponen (`src/routes/*.test.tsx`)** — aturan pilih slot di grid nyata,
 kedaluwarsanya countdown pembayaran beserta efeknya ke state machine,
 sinkronisasi filter ⇄ URL termasuk debounce, reset, state kosong, dan state
 error, gabung/batal open match beserta penolakan saat kuota penuh, tandai
-notifikasi dibaca, serta tulis ulasan termasuk validasi dan perhitungan ulang
-rata-rata.
+notifikasi dibaca, tulis ulasan termasuk validasi dan perhitungan ulang
+rata-rata, terima/tolak ajakan sparring, pembayaran biaya daftar turnamen
+(termasuk bukti kuota tidak bergerak sebelum dibayar), dan preferensi yang
+benar-benar mengubah tampilan.
 
 Tes komponen memakai handler MSW yang sama dengan app, jadi yang diuji kontrak
 sungguhan — bukan mock yang ditulis ulang khusus untuk tes.
@@ -285,17 +313,21 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 
 ## Yang masih mock
 
-- **Seluruh backend.** Tidak ada server, tidak ada database. Booking hidup di
-  memori dan hilang saat halaman di-reload.
+- **Seluruh backend.** Tidak ada server, tidak ada database. Datanya hidup di
+  memori dan disalin ke localStorage peramban ini saja — tidak ada yang sampai
+  ke perangkat lain, dan snapshot dibuang saat harinya berganti.
 - **Pembayaran.** Tidak ada gateway. Menekan Bayar langsung mengonfirmasi;
   QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode bayar sungguhan.
 - **Foto venue.** Blok warna beraksen, bukan foto.
-- **Menu Pengaturan** belum punya layar sendiri — ditandai "Segera" di profil.
-- **Notifikasi push** tidak ada; yang ada hanya daftar di dalam app.
-- **Chat** mengirim pesan ke store in-memory; tidak ada realtime.
-- **Ajakan sparring** berhenti sebagai notifikasi; belum ada kotak masuk
-  ajakan maupun alur terima/tolak.
-- **Pendaftaran turnamen** tidak menagih biaya daftar; hanya menaikkan kuota.
+- **Notifikasi push** tidak ada, dan sengaja tidak dipalsukan: push sungguhan
+  butuh service worker dengan kunci VAPID dan server yang mengirim — tanpa itu
+  yang bisa dibuat hanyalah tiruan yang menyesatkan. Yang ada: daftar notifikasi
+  di dalam app, dengan preferensi per jenis yang benar-benar berlaku.
+- **Chat** mengirim pesan ke store tiruan; tidak ada realtime, karena itu juga
+  butuh server (WebSocket atau SSE). Polling bisa saja dipasang, tapi itu meniru
+  bentuknya tanpa memberi sifatnya.
+- **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
+  usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
 
 ## Yang perlu dikirim untuk melangkah ke hi-fi sungguhan
 

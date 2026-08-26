@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { usePreferencesStore } from '@/store/preferences'
 import type { Sport } from '@/types'
 import { SPORTS } from '@/types'
 import type { VenueSearchParams } from './queries'
@@ -34,6 +35,8 @@ function parseNumber(value: string | null, fallback: number): number {
  */
 export function useSearchFilters() {
   const [params, setParams] = useSearchParams()
+  // Radius bawaan datang dari Pengaturan; URL tetap yang menang kalau diisi.
+  const preferredRadius = usePreferencesStore((s) => s.defaultRadiusKm)
 
   const filters = useMemo<Filters>(
     () => ({
@@ -41,10 +44,10 @@ export function useSearchFilters() {
       sport: parseSport(params.get('sport')),
       minPrice: parseNumber(params.get('minPrice'), DEFAULT_FILTERS.minPrice),
       maxPrice: parseNumber(params.get('maxPrice'), DEFAULT_FILTERS.maxPrice),
-      maxDistance: parseNumber(params.get('maxDistance'), DEFAULT_FILTERS.maxDistance),
+      maxDistance: parseNumber(params.get('maxDistance'), preferredRadius),
       indoorOnly: params.get('indoor') === '1',
     }),
-    [params],
+    [params, preferredRadius],
   )
 
   const setFilters = useCallback(
@@ -55,14 +58,14 @@ export function useSearchFilters() {
       if (next.sport) search.set('sport', next.sport)
       if (next.minPrice !== DEFAULT_FILTERS.minPrice) search.set('minPrice', String(next.minPrice))
       if (next.maxPrice !== DEFAULT_FILTERS.maxPrice) search.set('maxPrice', String(next.maxPrice))
-      if (next.maxDistance !== DEFAULT_FILTERS.maxDistance) {
+      if (next.maxDistance !== preferredRadius) {
         search.set('maxDistance', String(next.maxDistance))
       }
       if (next.indoorOnly) search.set('indoor', '1')
       // replace: mengetik di kotak cari tidak boleh membanjiri riwayat peramban.
       setParams(search, { replace: true })
     },
-    [filters, setParams],
+    [filters, setParams, preferredRadius],
   )
 
   const reset = useCallback(() => setParams(new URLSearchParams()), [setParams])
@@ -72,7 +75,7 @@ export function useSearchFilters() {
     (filters.minPrice !== DEFAULT_FILTERS.minPrice || filters.maxPrice !== DEFAULT_FILTERS.maxPrice
       ? 1
       : 0) +
-    (filters.maxDistance !== DEFAULT_FILTERS.maxDistance ? 1 : 0) +
+    (filters.maxDistance !== preferredRadius ? 1 : 0) +
     (filters.indoorOnly ? 1 : 0)
 
   return { filters, setFilters, reset, activeCount }
