@@ -52,7 +52,10 @@
     font: inherit;
     color: inherit;
     background: none;
-    border: none;
+    /* `border-width: 0`, bukan `border: none`. Shorthand-nya ikut mematikan
+       `border-style`, dan utilitas `border` Tailwind hanya menyetel lebar —
+       akibatnya tiap tombol sekunder kehilangan garis tepinya. */
+    border-width: 0;
     padding: 0;
     cursor: pointer;
   }
@@ -65,6 +68,14 @@
     overflow-x: hidden;
     scrollbar-width: none;
   }
+
+  /* Di kolom yang menggulir, tidak ada yang boleh digencet — itulah gunanya
+     menggulir. Tanpa aturan ini anak yang punya `overflow` sendiri (kartu
+     tiket, baris chip) dipadatkan sampai isinya terpotong, karena ukuran
+     minimum otomatis sebuah kontainer scroll adalah nol. */
+  .scroll-area > * {
+    flex-shrink: 0;
+  }
   .scroll-area::-webkit-scrollbar {
     display: none;
   }
@@ -72,6 +83,10 @@
   .row-scroll {
     overflow-x: auto;
     scrollbar-width: none;
+    /* Ukuran minimum otomatis sebuah kontainer scroll adalah nol, jadi sebagai
+       anak flex kolom yang isinya meluap baris ini akan digencet rata sampai
+       tingginya hilang. `flex-shrink: 0` menahannya setinggi isinya. */
+    flex-shrink: 0;
   }
   .row-scroll::-webkit-scrollbar {
     display: none;
