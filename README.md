@@ -15,14 +15,14 @@ Buka URL yang dicetak Vite, lalu tekan **Masuk dengan akun demo**.
 
 ## Perintah
 
-| Perintah           | Guna                                             |
-| ------------------ | ------------------------------------------------ |
-| `npm run dev`      | Dev server (MSW aktif otomatis)                  |
-| `npm run build`    | Typecheck + build produksi                       |
-| `npm run verify`   | `lint` + `typecheck` + `test` — gerbang sebelum PR |
-| `npm test`         | Vitest sekali jalan                              |
-| `npm run test:watch` | Vitest mode tonton                             |
-| `npm run format`   | Prettier                                         |
+| Perintah             | Guna                                               |
+| -------------------- | -------------------------------------------------- |
+| `npm run dev`        | Dev server (MSW aktif otomatis)                    |
+| `npm run build`      | Typecheck + build produksi                         |
+| `npm run verify`     | `lint` + `typecheck` + `test` — gerbang sebelum PR |
+| `npm test`           | Vitest sekali jalan                                |
+| `npm run test:watch` | Vitest mode tonton                                 |
+| `npm run format`     | Prettier                                           |
 
 ---
 
@@ -88,25 +88,25 @@ src/
 
 ### Rute
 
-| Rute                    | Layar                                      | Bottom nav |
-| ----------------------- | ------------------------------------------ | ---------- |
-| `/login`                | 01 Masuk / onboarding                      | —          |
-| `/`                     | 02 Home (tab Venue) · 13 Home v2 (tab Komunitas) | ✓    |
-| `/search`               | 03 Cari & filter                           | —          |
-| `/venue/:id`            | 04 Detail venue                            | —          |
-| `/venue/:id/schedule`   | 05 Pilih lapangan & jam                    | —          |
-| `/booking/summary`      | 06 Ringkasan + split bill                  | —          |
-| `/booking/payment`      | 07 Pembayaran + countdown                  | —          |
-| `/booking/:id/ticket`   | 08 E-tiket QR                              | —          |
-| `/bookings`             | 09 Booking saya                            | ✓          |
-| `/profile`              | 10 Profil & poin                           | ✓          |
-| `/venue/:id/reviews`    | 11 Ulasan                                  | —          |
-| `/notifications`        | 12 Notifikasi                              | —          |
-| `/match`                | 14 Cari lawan · 16 daftar tim              | ✓          |
-| `/tournaments`          | 15 Turnamen                                | —          |
-| `/team/:id`             | 16 Tim & komunitas                         | —          |
-| `/match/:id`            | 17 Detail open match                       | —          |
-| `/chat/:id`             | 18 Obrolan grup + kartu split bill         | —          |
+| Rute                  | Layar                                            | Bottom nav |
+| --------------------- | ------------------------------------------------ | ---------- |
+| `/login`              | 01 Masuk / onboarding                            | —          |
+| `/`                   | 02 Home (tab Venue) · 13 Home v2 (tab Komunitas) | ✓          |
+| `/search`             | 03 Cari & filter                                 | —          |
+| `/venue/:id`          | 04 Detail venue                                  | —          |
+| `/venue/:id/schedule` | 05 Pilih lapangan & jam                          | —          |
+| `/booking/summary`    | 06 Ringkasan + split bill                        | —          |
+| `/booking/payment`    | 07 Pembayaran + countdown                        | —          |
+| `/booking/:id/ticket` | 08 E-tiket QR                                    | —          |
+| `/bookings`           | 09 Booking saya                                  | ✓          |
+| `/profile`            | 10 Profil & poin                                 | ✓          |
+| `/venue/:id/reviews`  | 11 Ulasan                                        | —          |
+| `/notifications`      | 12 Notifikasi                                    | —          |
+| `/match`              | 14 Cari lawan · 16 daftar tim                    | ✓          |
+| `/tournaments`        | 15 Turnamen                                      | —          |
+| `/team/:id`           | 16 Tim & komunitas                               | —          |
+| `/match/:id`          | 17 Detail open match                             | —          |
+| `/chat/:id`           | 18 Obrolan grup + kartu split bill               | —          |
 
 Layar 02 dan 13 adalah dua wajah home yang sama-sama diminta brief, jadi
 keduanya jadi tab di rute `/` alih-alih dua URL yang bersaing.
@@ -156,7 +156,22 @@ sama persis. Progres lunas tampil di Booking saya dan di kartu chat.
 kelipatan 100 supaya angka yang ditawarkan selalu bisa ditukar.
 
 **E-tiket.** QR dibangkitkan dari kode booking dengan `qrcode.react` (SVG
-inline), jadi tetap bisa dibuka setelah halaman termuat sekali.
+inline), jadi tetap bisa dibuka setelah halaman termuat sekali. Tombol
+Bagikan memakai Web Share API dan jatuh ke papan klip kalau tidak ada;
+Kalender mengunduh berkas .ics yang dibangun sendiri — lengkap dengan
+pengingat 1 jam sebelum main dan RRULE mingguan untuk booking berulang.
+
+**Aksi komunitas.** Gabung/batal open match, gabung tim, ajak sparring, dan
+daftar turnamen semuanya memukul server tiruan dan mengubah data: kuota
+bergerak, slot kosong berkurang, tombol berganti jadi keadaan "sudah". Ajakan
+sparring muncul sebagai notifikasi baru.
+
+**Notifikasi.** Bisa ditandai dibaca satu per satu atau sekaligus, dan titik
+merah di Home menghitung yang benar-benar belum dibaca — bukan hiasan tetap.
+
+**Ulasan.** Bisa ditulis dari layar ulasan. Rating venue dihitung ulang dari
+ulasan yang benar-benar ada, supaya angka di kartu venue tidak pernah
+bertentangan dengan daftar ulasannya sendiri.
 
 **Persistensi.** Auth dan draft booking disimpan di localStorage dengan prefiks
 `lapangin:`. `clearAll()` hanya menghapus kunci berprefiks itu — kunci milik
@@ -178,27 +193,31 @@ tanpa itu deteksi bentrok jadwal berulang tidak bisa dipercaya.
 
 State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
-| Kasus                        | Cara memicu                                              |
-| ---------------------------- | -------------------------------------------------------- |
-| Server error saat mencari    | ketik `error` di kotak pencarian                          |
-| Slot direbut saat bayar      | booking **Lap. 1** mana pun pada **jam 21.00**, lalu Bayar |
-| Hold pembayaran habis        | diamkan layar pembayaran 10 menit                         |
-| Slot keburu diambil          | pilih slot yang baru saja dikunci booking lain            |
+| Kasus                     | Cara memicu                                                |
+| ------------------------- | ---------------------------------------------------------- |
+| Server error saat mencari | ketik `error` di kotak pencarian                           |
+| Slot direbut saat bayar   | booking **Lap. 1** mana pun pada **jam 21.00**, lalu Bayar |
+| Hold pembayaran habis     | diamkan layar pembayaran 10 menit                          |
+| Slot keburu diambil       | pilih slot yang baru saja dikunci booking lain             |
 
 ---
 
 ## Tes
 
-`npm test` — 72 tes, 7 berkas.
+`npm test` — 106 tes, 12 berkas.
 
 **Unit (`src/lib/*.test.ts`)** — perhitungan harga, penukaran poin dan batas
 30%, pembulatan split bill (termasuk pembuktian bahwa jumlah seluruh bagian
-sama persis dengan total), validasi slot bersambung, deteksi bentrok berulang.
+sama persis dengan total), validasi slot bersambung, deteksi bentrok berulang,
+pembangunan berkas .ics (escaping, lipatan baris per oktet, RRULE), dan jalur
+mundur berbagi.
 
 **Komponen (`src/routes/*.test.tsx`)** — aturan pilih slot di grid nyata,
-kedaluwarsanya countdown pembayaran beserta efeknya ke state machine, dan
+kedaluwarsanya countdown pembayaran beserta efeknya ke state machine,
 sinkronisasi filter ⇄ URL termasuk debounce, reset, state kosong, dan state
-error.
+error, gabung/batal open match beserta penolakan saat kuota penuh, tandai
+notifikasi dibaca, serta tulis ulasan termasuk validasi dan perhitungan ulang
+rata-rata.
 
 Tes komponen memakai handler MSW yang sama dengan app, jadi yang diuji kontrak
 sungguhan — bukan mock yang ditulis ulang khusus untuk tes.
@@ -271,11 +290,12 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Pembayaran.** Tidak ada gateway. Menekan Bayar langsung mengonfirmasi;
   QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode bayar sungguhan.
 - **Foto venue.** Blok warna beraksen, bukan foto.
-- **Aksi yang belum tersambung:** Gabung open match, Ajak sparring, Gabung tim,
-  daftar turnamen, Bagikan, Tambah ke kalender, dan menu Pengaturan.
-- **Notifikasi** hanya dibaca — tidak ada tandai-sudah-dibaca maupun push.
+- **Menu Pengaturan** belum punya layar sendiri — ditandai "Segera" di profil.
+- **Notifikasi push** tidak ada; yang ada hanya daftar di dalam app.
 - **Chat** mengirim pesan ke store in-memory; tidak ada realtime.
-- **Ulasan** hanya bisa dibaca; menulis ulasan belum ada.
+- **Ajakan sparring** berhenti sebagai notifikasi; belum ada kotak masuk
+  ajakan maupun alur terima/tolak.
+- **Pendaftaran turnamen** tidak menagih biaya daftar; hanya menaikkan kuota.
 
 ## Yang perlu dikirim untuk melangkah ke hi-fi sungguhan
 
