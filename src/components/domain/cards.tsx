@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { Clock, MapPin, Users } from 'lucide-react'
@@ -93,7 +94,14 @@ const TOURNAMENT_LABEL: Record<Tournament['status'], string> = {
   selesai: 'Selesai',
 }
 
-export function TournamentCard({ tournament }: { tournament: Tournament }) {
+export function TournamentCard({
+  tournament,
+  action,
+}: {
+  tournament: Tournament
+  /** CTA daftar — dilewatkan dari layar supaya kartu tetap tanpa state. */
+  action?: ReactNode
+}) {
   const ratio = tournament.slotsTaken / tournament.slotsTotal
   return (
     <article className="flex flex-col gap-3 rounded-lg bg-surface p-4">
@@ -127,6 +135,7 @@ export function TournamentCard({ tournament }: { tournament: Tournament }) {
           {tournament.slotsTaken}/{tournament.slotsTotal} peserta
         </span>
       </div>
+      {action}
     </article>
   )
 }

@@ -11,18 +11,22 @@ import { Icon } from '@/components/ui/Icon'
 export function Screen({
   children,
   bottom,
+  overlay,
   className,
 }: {
   children: ReactNode
   /** Sticky bottom bar: CTA utama atau bottom nav. */
   bottom?: ReactNode
+  /** Lapisan mengambang seperti toast — di luar area scroll supaya tidak ikut bergulir. */
+  overlay?: ReactNode
   className?: string
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-bg">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-bg">
       <div className={clsx('scroll-area flex flex-1 flex-col gap-6 px-5 pb-6 pt-5', className)}>
         {children}
       </div>
+      {overlay}
       {bottom}
     </div>
   )
