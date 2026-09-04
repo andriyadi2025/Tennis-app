@@ -16,6 +16,7 @@ import type {
 import {
   CHATS,
   CLUB_SETTINGS,
+  CURRENT_USER,
   NOTIFICATIONS,
   OPEN_MATCHES,
   REVIEWS,
@@ -178,6 +179,12 @@ export const store = {
   sparring: [] as SparringInvite[],
   /** Pengaturan klub yang bisa diubah admin lewat dasbor. */
   settings: structuredClone(CLUB_SETTINGS),
+  /*
+   * Profil domain: poin, tier, cabang favorit. Terpisah dari akun di server
+   * auth, yang hanya tahu identitas dan verifikasi. Poin berubah tiap
+   * booking, jadi ia harus tinggal di tempat yang bisa berubah.
+   */
+  profile: structuredClone(CURRENT_USER),
 }
 
 /** Tim dan turnamen yang sudah diikuti user di sesi ini. */
@@ -216,6 +223,7 @@ function loadCollections(): void {
   store.chats = structuredClone(CHATS)
   store.sparring = structuredClone(SPARRING)
   store.settings = structuredClone(CLUB_SETTINGS)
+  store.profile = structuredClone(CURRENT_USER)
   joinedTeams.clear()
   registeredTournaments.clear()
 }

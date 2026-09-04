@@ -64,6 +64,15 @@ export function useMe() {
   })
 }
 
+/** Poin domain berubah lewat server tiruan, bukan di store auth. */
+export function useAdjustPoints() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (delta: number) => apiPost<User>('/api/me/points', { delta }),
+    onSuccess: (user) => client.setQueryData(queryKeys.me, user),
+  })
+}
+
 export function useVenues(params: VenueSearchParams) {
   return useQuery({
     queryKey: queryKeys.venues(params),

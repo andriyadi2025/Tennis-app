@@ -16,6 +16,7 @@ import type {
   Venue,
 } from '@/types'
 import { computePrice } from '@/lib/pricing'
+import { tierFor } from '@/lib/points'
 import { toRange } from '@/lib/slots'
 import { addWeeks, parseISO } from '@/lib/dates'
 import {
@@ -176,20 +177,17 @@ export const ADD_ONS = [
 export const handlers = [
   http.get('/api/me', async () => {
     await latency()
-    return HttpResponse.json(CURRENT_USER)
+    return HttpResponse.json(store.profile)
   }),
 
-  http.post('/api/auth/login', async ({ request }) => {
+  /** Poin bertambah setelah main dan berkurang saat ditukar. */
+  http.post('/api/me/points', async ({ request }) => {
     await latency()
-    const body = (await request.json()) as { phone?: string }
-    const phone = (body.phone ?? '').replace(/\D/g, '')
-    if (phone.length < 9) {
-      return HttpResponse.json(
-        { message: 'Nomor HP tidak valid. Contoh: 0812 8845 1190.' },
-        { status: 422 },
-      )
-    }
-    return HttpResponse.json({ user: CURRENT_USER, token: 'mock-token' })
+    const { delta } = (await request.json()) as { delta: number }
+    store.profile.points = Math.max(0, store.profile.points + Math.round(delta))
+    store.profile.tier = tierFor(store.profile.points)
+    persistDb()
+    return HttpResponse.json(store.profile)
   }),
 
   http.get('/api/venues', async ({ request }) => {
