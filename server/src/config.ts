@@ -22,6 +22,16 @@ function required(name: string, fallback: string): string {
   return fallback
 }
 
+/**
+ * Pepper bawaan untuk pengembangan. Diberi nama, bukan ditulis inline, supaya
+ * pemeriksaan kesiapan deploy bisa mengenalinya kembali — string yang cuma
+ * lewat sebagai fallback tidak bisa dideteksi belakangan.
+ */
+export const DEV_TOKEN_PEPPER = 'pepper-pengembangan-jangan-dipakai-produksi'
+
+/** Panjang minimum pepper yang masih masuk akal untuk HMAC. */
+export const MIN_PEPPER_LENGTH = 32
+
 export interface OAuthProvider {
   clientId: string
   clientSecret: string
@@ -44,12 +54,19 @@ export const config = {
   /** Berkas SQLite. `:memory:` dipakai tes supaya tiap kasus bersih. */
   databaseFile: env('DATABASE_FILE') ?? 'dbtc.sqlite',
 
+  /*
+   * Kalau diisi, Postgres yang dipakai dan DATABASE_FILE diabaikan. Satu
+   * variabel yang menentukan drivernya, bukan dua yang bisa bertentangan —
+   * tidak ada keadaan "pakai Postgres tapi URL-nya kosong".
+   */
+  databaseUrl: env('DATABASE_URL') ?? null,
+
   /**
    * Kunci untuk mem-hash token sesi sebelum disimpan. Bukan untuk JWT —
    * sesi di sini bersifat opaque dan bisa dicabut, yang lebih aman daripada
    * token bertanda tangan yang tidak bisa ditarik sebelum kedaluwarsa.
    */
-  tokenPepper: required('TOKEN_PEPPER', 'pepper-pengembangan-jangan-dipakai-produksi'),
+  tokenPepper: required('TOKEN_PEPPER', DEV_TOKEN_PEPPER),
 
   /**
    * Kontak yang otomatis jadi admin klub, dipisah koma. Tanpa ini tidak ada
@@ -98,4 +115,103 @@ export function providerStatus() {
     smsDelivery: smsConfigured() ? 'twilio' : 'log',
     emailDelivery: smtpConfigured() ? 'smtp' : 'log',
   } as const
+}
+
+/* ── Kesiapan deploy ─────────────────────────────────────────────────────── */
+
+export type ReadinessLevel = 'fatal' | 'warn'
+
+export interface ReadinessIssue {
+  level: ReadinessLevel
+  setting: string
+  message: string
+}
+
+/**
+ * Memeriksa konfigurasi terhadap hal-hal yang diam-diam merusak di produksi.
+ *
+ * Dikembalikan sebagai daftar, bukan dilempar langsung, supaya seluruh
+ * masalah terlihat sekaligus. Memperbaiki satu-satu lalu men-deploy ulang
+ * untuk menemukan yang berikutnya adalah cara yang mahal untuk membaca
+ * daftar ini.
+ */
+export function readiness(): ReadinessIssue[] {
+  const issues: ReadinessIssue[] = []
+  const fatal = (setting: string, message: string) =>
+    issues.push({ level: 'fatal', setting, message })
+  const warn = (setting: string, message: string) =>
+    issues.push({ level: 'warn', setting, message })
+
+  /*
+   * Pepper bawaan berarti setiap token sesi bisa dipalsukan siapa pun yang
+   * pernah membaca repositori ini. Diperiksa terhadap nilainya, bukan cuma
+   * "apakah variabelnya diisi": menyalin nilai dari README ke .env tetap
+   * meninggalkan pepper yang sudah publik.
+   */
+  if (config.tokenPepper === DEV_TOKEN_PEPPER) {
+    fatal(
+      'TOKEN_PEPPER',
+      'Masih memakai pepper bawaan yang tertulis di repositori ini. Isi dengan nilai acak: `openssl rand -base64 48`.',
+    )
+  } else if (config.tokenPepper.length < MIN_PEPPER_LENGTH) {
+    fatal(
+      'TOKEN_PEPPER',
+      `Panjangnya ${config.tokenPepper.length} karakter, minimal ${MIN_PEPPER_LENGTH}.`,
+    )
+  }
+
+  /*
+   * SQLite adalah satu berkas di satu mesin. Dua instance app yang menunjuk
+   * berkas yang sama lewat disk jaringan akan merusaknya, dan yang menunjuk
+   * berkas berbeda akan diam-diam punya dua kumpulan user.
+   */
+  if (!config.databaseUrl) {
+    warn(
+      'DATABASE_URL',
+      'Memakai SQLite berkas. Cukup untuk satu instance; isi DATABASE_URL kalau app dijalankan lebih dari satu proses.',
+    )
+  }
+
+  if (config.adminContacts.length === 0) {
+    warn(
+      'ADMIN_CONTACTS',
+      'Kosong, jadi tidak ada yang bisa jadi admin klub. Isi dengan nomor atau email pengurus.',
+    )
+  }
+
+  if (!smsConfigured()) {
+    warn('TWILIO_*', 'Kode OTP dicetak ke log server, bukan dikirim lewat SMS.')
+  }
+  if (!smtpConfigured()) {
+    warn('SMTP_*', 'Email verifikasi dan atur ulang sandi dicetak ke log, bukan dikirim.')
+  }
+  if (config.appOrigin.startsWith('http://') && !config.appOrigin.includes('localhost')) {
+    fatal('APP_ORIGIN', 'Bukan HTTPS. Token sesi akan melintas dalam bentuk terbaca.')
+  }
+
+  return issues
+}
+
+/**
+ * Mencetak hasil pemeriksaan, dan menolak start kalau ada yang fatal **di
+ * produksi**. Di luar produksi hanya diberitahukan: memblokir `npm run dev`
+ * karena pepper bawaan akan membuat orang menghapus pemeriksaannya.
+ */
+export function assertReady(log: (message: string) => void = console.warn): void {
+  const issues = readiness()
+  if (issues.length === 0) {
+    log('[config] Semua pemeriksaan kesiapan lolos.')
+    return
+  }
+
+  for (const { level, setting, message } of issues) {
+    log(`[config:${level}] ${setting} — ${message}`)
+  }
+
+  const fatals = issues.filter((i) => i.level === 'fatal')
+  if (fatals.length > 0 && config.isProduction) {
+    throw new Error(
+      `Server menolak start: ${fatals.map((f) => f.setting).join(', ')} belum layak produksi.`,
+    )
+  }
 }

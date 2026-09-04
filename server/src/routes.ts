@@ -60,24 +60,24 @@ function bearer(req: Request): string | null {
 }
 
 /** Sesi baru + bentuk balasan yang sama untuk semua metode masuk. */
-function signIn(res: Response, userId: string, extra: Record<string, unknown> = {}) {
-  const session = createSession(userId)
-  const found = findUserById(userId)
+async function signIn(res: Response, userId: string, extra: Record<string, unknown> = {}) {
+  const session = await createSession(userId)
+  const found = await findUserById(userId)
   if (!found) return fail(res, 500, 'USER_MISSING', 'User hilang saat membuat sesi.')
   // Daftar admin bisa berubah kapan saja; peran disegarkan tiap kali masuk.
-  const row = syncRole(found)
+  const row = await syncRole(found)
   return res.json({
     token: session.token,
     expiresAt: session.expiresAt,
     user: publicUser(row),
-    identities: identitiesFor(userId),
+    identities: await identitiesFor(userId),
     ...extra,
   })
 }
 
 /* ── Status penyedia ─────────────────────────────────────────────────────── */
 
-routes.get('/providers', (_req, res) => {
+routes.get('/providers', async (_req, res) => {
   res.json(providerStatus())
 })
 
@@ -94,7 +94,7 @@ routes.post('/phone/request-otp', async (req, res) => {
     return fail(res, 422, 'INVALID_PHONE', 'Nomor HP tidak valid. Contoh: 0812 8845 1190.')
   }
 
-  const issued = issueOtp(phone)
+  const issued = await issueOtp(phone)
   if (!issued.ok) {
     const message =
       issued.reason === 'cooldown'
@@ -130,7 +130,7 @@ const verifySchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
 })
 
-routes.post('/phone/verify-otp', (req, res) => {
+routes.post('/phone/verify-otp', async (req, res) => {
   const parsed = verifySchema.safeParse(req.body)
   if (!parsed.success) {
     return fail(res, 422, 'INVALID_BODY', parsed.error.issues[0]?.message ?? 'Data tidak valid.')
@@ -139,7 +139,7 @@ routes.post('/phone/verify-otp', (req, res) => {
   const phone = normalisePhone(parsed.data.phone)
   if (!phone) return fail(res, 422, 'INVALID_PHONE', 'Nomor HP tidak valid.')
 
-  const check = verifyOtp(phone, parsed.data.code)
+  const check = await verifyOtp(phone, parsed.data.code)
   if (!check.ok) {
     const messages: Record<typeof check.reason, string> = {
       notFound: 'Belum ada kode aktif untuk nomor ini. Minta kode baru.',
@@ -158,12 +158,12 @@ routes.post('/phone/verify-otp', (req, res) => {
     )
   }
 
-  const existing = findUserByPhone(phone)
+  const existing = await findUserByPhone(phone)
   const user =
     existing ??
-    createUser({ name: parsed.data.name?.trim() || 'Anggota', phone, phoneVerified: true })
+    (await createUser({ name: parsed.data.name?.trim() || 'Anggota', phone, phoneVerified: true }))
   if (existing && existing.phone_verified === 0) {
-    db.prepare('UPDATE users SET phone_verified = 1 WHERE id = ?').run(existing.id)
+    await db.run('UPDATE users SET phone_verified = 1 WHERE id = ?', [existing.id])
   }
   return signIn(res, user.id)
 })
@@ -188,17 +188,17 @@ routes.post('/email/register', async (req, res) => {
   const problem = checkPassword(parsed.data.password)
   if (problem) return fail(res, 422, 'WEAK_PASSWORD', problem.message)
 
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     return fail(res, 409, 'EMAIL_TAKEN', 'Email ini sudah terdaftar. Masuk saja.')
   }
 
-  const user = createUser({
+  const user = await createUser({
     name: parsed.data.name,
     email,
     passwordHash: await hashPassword(parsed.data.password),
   })
 
-  const token = issueEmailToken(user.id, 'verify')
+  const token = await issueEmailToken(user.id, 'verify')
   const delivery = await sendEmail(
     email,
     'Verifikasi email DBTC',
@@ -219,7 +219,7 @@ routes.post('/email/login', async (req, res) => {
   if (!parsed.success) return fail(res, 422, 'INVALID_BODY', 'Email dan kata sandi wajib diisi.')
 
   const email = normaliseEmail(parsed.data.email)
-  const user = email ? findUserByEmail(email) : undefined
+  const user = email ? await findUserByEmail(email) : undefined
 
   /*
    * Satu pesan yang sama untuk email tidak terdaftar maupun sandi salah.
@@ -235,27 +235,27 @@ routes.post('/email/login', async (req, res) => {
 
 const emailTokenSchema = z.object({ token: z.string().min(1) })
 
-routes.post('/email/verify', (req, res) => {
+routes.post('/email/verify', async (req, res) => {
   const parsed = emailTokenSchema.safeParse(req.body)
   if (!parsed.success) return fail(res, 422, 'INVALID_BODY', 'Token wajib diisi.')
 
-  const user = consumeEmailToken(parsed.data.token, 'verify')
+  const user = await consumeEmailToken(parsed.data.token, 'verify')
   if (!user) return fail(res, 410, 'TOKEN_INVALID', 'Tautan verifikasi tidak berlaku lagi.')
 
-  markEmailVerified(user.id)
+  await markEmailVerified(user.id)
   res.json({ ok: true, user: publicUser({ ...user, email_verified: 1 }) })
 })
 
 routes.post('/email/resend-verification', async (req, res) => {
   const token = bearer(req)
-  const user = token ? userForSession(token) : undefined
+  const user = token ? await userForSession(token) : undefined
   if (!user) return fail(res, 401, 'UNAUTHENTICATED', 'Masuk dulu.')
   if (!user.email) return fail(res, 422, 'NO_EMAIL', 'Akun ini belum punya email.')
   if (user.email_verified === 1) {
     return fail(res, 409, 'ALREADY_VERIFIED', 'Email kamu sudah terverifikasi.')
   }
 
-  const fresh = issueEmailToken(user.id, 'verify')
+  const fresh = await issueEmailToken(user.id, 'verify')
   const delivery = await sendEmail(
     user.email,
     'Verifikasi email DBTC',
@@ -274,7 +274,7 @@ function providerName(value: string): ProviderName | null {
   return value === 'google' || value === 'facebook' ? value : null
 }
 
-routes.get('/oauth/:provider/start', (req, res) => {
+routes.get('/oauth/:provider/start', async (req, res) => {
   const name = providerName(req.params.provider)
   if (!name) return fail(res, 404, 'UNKNOWN_PROVIDER', 'Penyedia tidak dikenal.')
 
@@ -288,7 +288,7 @@ routes.get('/oauth/:provider/start', (req, res) => {
     )
   }
 
-  const started = beginOAuth(name)
+  const started = await beginOAuth(name)
   if (!started) return fail(res, 500, 'OAUTH_START_FAILED', 'Gagal memulai alur OAuth.')
   res.redirect(started.url)
 })
@@ -314,7 +314,7 @@ routes.get('/oauth/:provider/callback', async (req, res) => {
   const state = typeof req.query.state === 'string' ? req.query.state : null
   if (!code || !state) return back({ error: 'missing_code' })
 
-  const stored = takeOAuthState(state)
+  const stored = await takeOAuthState(state)
   // State tidak cocok berarti balasan ini bukan milik permintaan kita.
   if (!stored || stored.provider !== name) return back({ error: 'bad_state' })
 
@@ -328,34 +328,34 @@ routes.get('/oauth/:provider/callback', async (req, res) => {
      * yang diterbitkan — sesi yang sedang berjalan tetap yang berlaku.
      */
     if (stored.link_user_id) {
-      const target = findUserById(stored.link_user_id)
+      const target = await findUserById(stored.link_user_id)
       if (!target) return back({ error: 'link_user_missing', link: name })
 
-      const owner = ownerOfIdentity(name, profile.subject)
+      const owner = await ownerOfIdentity(name, profile.subject)
       if (owner && owner !== target.id) {
         // Satu akun penyedia tidak boleh menempel di dua akun DBTC.
         return back({ error: 'provider_taken', link: name })
       }
 
-      linkIdentity(target.id, name, profile.subject, email)
+      await linkIdentity(target.id, name, profile.subject, email)
       return back({ linked: name })
     }
 
-    let user = findUserByIdentity(name, profile.subject)
+    let user = await findUserByIdentity(name, profile.subject)
     if (!user && email) {
       // Email yang sama dianggap orang yang sama, lalu identitasnya ditautkan.
-      const byEmail = findUserByEmail(email)
+      const byEmail = await findUserByEmail(email)
       if (byEmail) {
-        linkIdentity(byEmail.id, name, profile.subject, email)
+        await linkIdentity(byEmail.id, name, profile.subject, email)
         user = byEmail
       }
     }
     if (!user) {
-      user = createUser({ name: profile.name, email, emailVerified: Boolean(email) })
-      linkIdentity(user.id, name, profile.subject, email)
+      user = await createUser({ name: profile.name, email, emailVerified: Boolean(email) })
+      await linkIdentity(user.id, name, profile.subject, email)
     }
 
-    const session = createSession(user.id)
+    const session = await createSession(user.id)
     return back({ token: session.token })
   } catch (error) {
     console.error(`[oauth:${name}]`, error)
@@ -384,10 +384,10 @@ routes.post('/password/forgot', async (req, res) => {
   }
 
   const email = normaliseEmail(parsed.data.email)
-  const user = email ? findUserByEmail(email) : undefined
+  const user = email ? await findUserByEmail(email) : undefined
   if (!user) return res.json(same)
 
-  const token = issueEmailToken(user.id, 'reset')
+  const token = await issueEmailToken(user.id, 'reset')
   const delivery = await sendEmail(
     user.email!,
     'Atur ulang kata sandi DBTC',
@@ -413,19 +413,19 @@ routes.post('/password/reset', async (req, res) => {
 
   // Token diperiksa setelah sandinya, supaya sandi lemah tidak menghanguskan
   // token sekali-pakai dan memaksa orang meminta kode baru.
-  const user = consumeEmailToken(parsed.data.token, 'reset')
+  const user = await consumeEmailToken(parsed.data.token, 'reset')
   if (!user) return fail(res, 410, 'TOKEN_INVALID', 'Kode atur ulang tidak berlaku lagi.')
 
-  setPassword(user.id, await hashPassword(parsed.data.password))
+  await setPassword(user.id, await hashPassword(parsed.data.password))
   /*
    * Semua sesi lama dicabut. Kalau tidak, siapa pun yang sudah masuk dengan
    * sandi lama tetap masuk — dan mengatur ulang sandi tidak menyelesaikan
    * apa pun bagi orang yang akunnya diambil alih.
    */
-  const revoked = revokeAllSessions(user.id)
+  const revoked = await revokeAllSessions(user.id)
 
   // Email yang bisa menerima kode itu terbukti dimiliki orang yang sama.
-  if (user.email_verified === 0) markEmailVerified(user.id)
+  if (user.email_verified === 0) await markEmailVerified(user.id)
 
   return signIn(res, user.id, { revokedSessions: revoked })
 })
@@ -433,9 +433,9 @@ routes.post('/password/reset', async (req, res) => {
 /* ── Menyambungkan cara masuk ke akun yang sama ──────────────────────────── */
 
 /** Middleware kecil: rute di bawah ini semua butuh sesi. */
-function requireUser(req: Request, res: Response): UserRow | null {
+async function requireUser(req: Request, res: Response): Promise<UserRow | null> {
   const token = bearer(req)
-  const user = token ? userForSession(token) : undefined
+  const user = token ? await userForSession(token) : undefined
   if (!user) {
     fail(res, 401, 'UNAUTHENTICATED', 'Masuk dulu.')
     return null
@@ -443,22 +443,22 @@ function requireUser(req: Request, res: Response): UserRow | null {
   return user
 }
 
-function linkState(user: UserRow) {
+async function linkState(user: UserRow) {
   return {
-    methods: signInMethods(user),
+    methods: await signInMethods(user),
     user: publicUser(user),
-    identities: identitiesFor(user.id),
+    identities: await identitiesFor(user.id),
   }
 }
 
-routes.get('/link', (req, res) => {
-  const user = requireUser(req, res)
+routes.get('/link', async (req, res) => {
+  const user = await requireUser(req, res)
   if (!user) return
-  res.json(linkState(user))
+  res.json(await linkState(user))
 })
 
 routes.post('/link/phone/request-otp', async (req, res) => {
-  const user = requireUser(req, res)
+  const user = await requireUser(req, res)
   if (!user) return
 
   const parsed = phoneSchema.safeParse(req.body)
@@ -472,7 +472,7 @@ routes.post('/link/phone/request-otp', async (req, res) => {
    * Menggabungkan dua akun berarti memutuskan booking dan poin siapa yang
    * bertahan — keputusan itu bukan milik endpoint ini.
    */
-  const owner = findUserByPhone(phone)
+  const owner = await findUserByPhone(phone)
   if (owner && owner.id !== user.id) {
     return fail(
       res,
@@ -483,7 +483,7 @@ routes.post('/link/phone/request-otp', async (req, res) => {
   }
   if (owner) return fail(res, 409, 'ALREADY_LINKED', 'Nomor ini sudah tersambung ke akunmu.')
 
-  const issued = issueOtp(phone)
+  const issued = await issueOtp(phone)
   if (!issued.ok) {
     return fail(
       res,
@@ -510,8 +510,8 @@ routes.post('/link/phone/request-otp', async (req, res) => {
   })
 })
 
-routes.post('/link/phone/verify', (req, res) => {
-  const user = requireUser(req, res)
+routes.post('/link/phone/verify', async (req, res) => {
+  const user = await requireUser(req, res)
   if (!user) return
 
   const parsed = verifySchema.safeParse(req.body)
@@ -523,12 +523,12 @@ routes.post('/link/phone/verify', (req, res) => {
   if (!phone) return fail(res, 422, 'INVALID_PHONE', 'Nomor HP tidak valid.')
 
   // Diperiksa lagi: nomornya bisa saja diklaim akun lain sejak kode dikirim.
-  const owner = findUserByPhone(phone)
+  const owner = await findUserByPhone(phone)
   if (owner && owner.id !== user.id) {
     return fail(res, 409, 'PHONE_TAKEN', 'Nomor ini sudah dipakai akun lain.')
   }
 
-  const check = verifyOtp(phone, parsed.data.code)
+  const check = await verifyOtp(phone, parsed.data.code)
   if (!check.ok) {
     return fail(
       res,
@@ -541,9 +541,9 @@ routes.post('/link/phone/verify', (req, res) => {
     )
   }
 
-  attachPhone(user.id, phone)
-  const fresh = syncRole(findUserById(user.id)!)
-  res.json(linkState(fresh))
+  await attachPhone(user.id, phone)
+  const fresh = await syncRole((await findUserById(user.id))!)
+  res.json(await linkState(fresh))
 })
 
 const linkEmailSchema = z.object({
@@ -552,7 +552,7 @@ const linkEmailSchema = z.object({
 })
 
 routes.post('/link/email', async (req, res) => {
-  const user = requireUser(req, res)
+  const user = await requireUser(req, res)
   if (!user) return
 
   const parsed = linkEmailSchema.safeParse(req.body)
@@ -561,7 +561,7 @@ routes.post('/link/email', async (req, res) => {
   const email = normaliseEmail(parsed.data.email)
   if (!email) return fail(res, 422, 'INVALID_EMAIL', 'Format email tidak valid.')
 
-  const owner = findUserByEmail(email)
+  const owner = await findUserByEmail(email)
   if (owner && owner.id !== user.id) {
     return fail(res, 409, 'EMAIL_TAKEN', 'Email ini sudah dipakai akun lain.')
   }
@@ -585,26 +585,26 @@ routes.post('/link/email', async (req, res) => {
     )
   }
 
-  attachEmail(user.id, email, passwordHash)
+  await attachEmail(user.id, email, passwordHash)
 
-  const token = issueEmailToken(user.id, 'verify')
+  const token = await issueEmailToken(user.id, 'verify')
   const delivery = await sendEmail(
     email,
     'Verifikasi email DBTC',
     `Masukkan kode ini di app untuk memverifikasi email kamu:\n\n${token}\n\nBerlaku 24 jam.`,
   )
 
-  const fresh = syncRole(findUserById(user.id)!)
+  const fresh = await syncRole((await findUserById(user.id))!)
   res.json({
-    ...linkState(fresh),
+    ...(await linkState(fresh)),
     delivery: delivery.channel,
     ...(config.isProduction ? {} : { devToken: token }),
   })
 })
 
 /** Memulai OAuth untuk menyambung, bukan untuk masuk. */
-routes.get('/link/:provider/start', (req, res) => {
-  const user = requireUser(req, res)
+routes.get('/link/:provider/start', async (req, res) => {
+  const user = await requireUser(req, res)
   if (!user) return
 
   const name = providerName(req.params.provider)
@@ -618,7 +618,7 @@ routes.get('/link/:provider/start', (req, res) => {
     )
   }
 
-  const started = beginOAuth(name, user.id)
+  const started = await beginOAuth(name, user.id)
   if (!started) return fail(res, 500, 'OAUTH_START_FAILED', 'Gagal memulai alur OAuth.')
   // URL dikembalikan, bukan di-redirect: permintaan ini bawa header
   // Authorization, dan redirect akan kehilangan header itu.
@@ -628,8 +628,8 @@ routes.get('/link/:provider/start', (req, res) => {
 const UNLINKABLE = ['phone', 'email', 'google', 'facebook'] as const
 type Unlinkable = (typeof UNLINKABLE)[number]
 
-routes.delete('/link/:method', (req, res) => {
-  const user = requireUser(req, res)
+routes.delete('/link/:method', async (req, res) => {
+  const user = await requireUser(req, res)
   if (!user) return
 
   const method = req.params.method as Unlinkable
@@ -637,7 +637,7 @@ routes.delete('/link/:method', (req, res) => {
     return fail(res, 404, 'UNKNOWN_METHOD', 'Cara masuk tidak dikenal.')
   }
 
-  const methods = signInMethods(user)
+  const methods = await signInMethods(user)
   if (!methods.includes(method)) {
     return fail(res, 409, 'NOT_LINKED', 'Cara masuk itu belum tersambung ke akunmu.')
   }
@@ -655,27 +655,27 @@ routes.delete('/link/:method', (req, res) => {
     )
   }
 
-  if (method === 'phone') detachPhone(user.id)
-  else if (method === 'email') detachEmail(user.id)
-  else unlinkIdentity(user.id, method)
+  if (method === 'phone') await detachPhone(user.id)
+  else if (method === 'email') await detachEmail(user.id)
+  else await unlinkIdentity(user.id, method)
 
-  const fresh = syncRole(findUserById(user.id)!)
-  res.json(linkState(fresh))
+  const fresh = await syncRole((await findUserById(user.id))!)
+  res.json(await linkState(fresh))
 })
 
 /* ── Sesi ────────────────────────────────────────────────────────────────── */
 
-routes.get('/me', (req, res) => {
+routes.get('/me', async (req, res) => {
   const token = bearer(req)
-  const user = token ? userForSession(token) : undefined
+  const user = token ? await userForSession(token) : undefined
   if (!user) return fail(res, 401, 'UNAUTHENTICATED', 'Sesi tidak berlaku.')
-  const fresh = syncRole(user)
-  res.json({ user: publicUser(fresh), identities: identitiesFor(fresh.id) })
+  const fresh = await syncRole(user)
+  res.json({ user: publicUser(fresh), identities: await identitiesFor(fresh.id) })
 })
 
-routes.post('/logout', (req, res) => {
+routes.post('/logout', async (req, res) => {
   const token = bearer(req)
-  if (token) revokeSession(token)
+  if (token) await revokeSession(token)
   // Keluar selalu berhasil dari sudut pandang pemanggil.
   res.json({ ok: true })
 })

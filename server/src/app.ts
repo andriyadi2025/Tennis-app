@@ -1,5 +1,6 @@
 import express from 'express'
-import { config, providerStatus } from './config.ts'
+import { config, providerStatus, readiness } from './config.ts'
+import { db } from './db.ts'
 import { routes } from './routes.ts'
 
 /**
@@ -27,8 +28,22 @@ export function createApp() {
     next()
   })
 
+  /*
+   * Health check menyebut juga apa yang belum layak produksi. Deploy yang
+   * berhasil tapi salah konfigurasi tampak persis sama dengan yang benar
+   * dari luar; ini yang membedakannya tanpa perlu membaca log start-up.
+   */
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, providers: providerStatus() })
+    const issues = readiness()
+    res.json({
+      ok: true,
+      database: db.dialect,
+      providers: providerStatus(),
+      readiness: {
+        ok: issues.every((i) => i.level !== 'fatal'),
+        issues,
+      },
+    })
   })
 
   app.use('/api/auth', routes)

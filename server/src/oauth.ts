@@ -71,10 +71,10 @@ export function redirectUri(name: ProviderName): string {
  * ditaruh di URL bisa diubah pengguna, dan ini menentukan akun mana yang
  * mendapat identitas baru.
  */
-export function beginOAuth(
+export async function beginOAuth(
   name: ProviderName,
   linkUserId: string | null = null,
-): { url: string; state: string } | null {
+): Promise<{ url: string; state: string } | null> {
   const credentials = providerConfig(name)
   if (!credentials) return null
 
@@ -82,15 +82,16 @@ export function beginOAuth(
   const state = newToken(24)
   const verifier = newCodeVerifier()
 
-  db.prepare(
+  await db.run(
     'INSERT INTO oauth_states (state, provider, code_verifier, link_user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(
-    state,
-    name,
-    verifier,
-    linkUserId,
-    new Date().toISOString(),
-    new Date(Date.now() + 10 * 60_000).toISOString(),
+    [
+      state,
+      name,
+      verifier,
+      linkUserId,
+      new Date().toISOString(),
+      new Date(Date.now() + 10 * 60_000).toISOString(),
+    ],
   )
 
   const params = new URLSearchParams({
@@ -117,11 +118,10 @@ interface StateRow {
 }
 
 /** State sekali pakai: dihapus begitu diambil, sah atau tidak. */
-export function takeOAuthState(state: string): StateRow | null {
-  const row = db.prepare('SELECT * FROM oauth_states WHERE state = ?').get(state) as
-    StateRow | undefined
+export async function takeOAuthState(state: string): Promise<StateRow | null> {
+  const row = await db.get<StateRow>('SELECT * FROM oauth_states WHERE state = ?', [state])
   if (!row) return null
-  db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state)
+  await db.run('DELETE FROM oauth_states WHERE state = ?', [state])
   if (new Date(row.expires_at).getTime() <= Date.now()) return null
   return row
 }

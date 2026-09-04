@@ -65,10 +65,10 @@ export function roleFor(phone: string | null, email: string | null): 'member' | 
 }
 
 /** Menyelaraskan peran tersimpan dengan daftar terkini. */
-export function syncRole(user: UserRow): UserRow {
+export async function syncRole(user: UserRow): Promise<UserRow> {
   const should = roleFor(user.phone, user.email)
   if (should === user.role) return user
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(should, user.id)
+  await db.run('UPDATE users SET role = ? WHERE id = ?', [should, user.id])
   return { ...user, role: should }
 }
 
@@ -78,16 +78,16 @@ function now(): string {
   return new Date().toISOString()
 }
 
-export function findUserById(id: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined
+export function findUserById(id: string): Promise<UserRow | undefined> {
+  return db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id])
 }
 
-export function findUserByPhone(phone: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE phone = ?').get(phone) as UserRow | undefined
+export function findUserByPhone(phone: string): Promise<UserRow | undefined> {
+  return db.get<UserRow>('SELECT * FROM users WHERE phone = ?', [phone])
 }
 
-export function findUserByEmail(email: string): UserRow | undefined {
-  return db.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined
+export function findUserByEmail(email: string): Promise<UserRow | undefined> {
+  return db.get<UserRow>('SELECT * FROM users WHERE email = ?', [email])
 }
 
 interface CreateUser {
@@ -99,23 +99,24 @@ interface CreateUser {
   passwordHash?: string | null
 }
 
-export function createUser(input: CreateUser): UserRow {
+export async function createUser(input: CreateUser): Promise<UserRow> {
   const id = `u-${randomUUID()}`
-  db.prepare(
+  await db.run(
     `INSERT INTO users (id, name, phone, phone_verified, email, email_verified, password_hash, role, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    input.name,
-    input.phone ?? null,
-    input.phoneVerified ? 1 : 0,
-    input.email ?? null,
-    input.emailVerified ? 1 : 0,
-    input.passwordHash ?? null,
-    roleFor(input.phone ?? null, input.email ?? null),
-    now(),
+    [
+      id,
+      input.name,
+      input.phone ?? null,
+      input.phoneVerified ? 1 : 0,
+      input.email ?? null,
+      input.emailVerified ? 1 : 0,
+      input.passwordHash ?? null,
+      roleFor(input.phone ?? null, input.email ?? null),
+      now(),
+    ],
   )
-  return findUserById(id)!
+  return (await findUserById(id))!
 }
 
 /** Bentuk user yang aman dikirim ke klien — tanpa hash sandi. */
@@ -134,26 +135,28 @@ export function publicUser(row: UserRow) {
 
 /* ── Sesi ────────────────────────────────────────────────────────────────── */
 
-export function createSession(userId: string): { token: string; expiresAt: string } {
+export async function createSession(userId: string): Promise<{ token: string; expiresAt: string }> {
   const token = newToken()
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 86_400_000).toISOString()
-  db.prepare(
+  await db.run(
     'INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)',
-  ).run(hashToken(token), userId, now(), expiresAt)
+    [hashToken(token), userId, now(), expiresAt],
+  )
   return { token, expiresAt }
 }
 
-export function userForSession(token: string): UserRow | undefined {
-  const row = db
-    .prepare('SELECT user_id, expires_at FROM sessions WHERE token_hash = ?')
-    .get(hashToken(token)) as { user_id: string; expires_at: string } | undefined
+export async function userForSession(token: string): Promise<UserRow | undefined> {
+  const row = await db.get<{ user_id: string; expires_at: string }>(
+    'SELECT user_id, expires_at FROM sessions WHERE token_hash = ?',
+    [hashToken(token)],
+  )
   if (!row) return undefined
   if (new Date(row.expires_at).getTime() <= Date.now()) return undefined
   return findUserById(row.user_id)
 }
 
-export function revokeSession(token: string): void {
-  db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token))
+export async function revokeSession(token: string): Promise<void> {
+  await db.run('DELETE FROM sessions WHERE token_hash = ?', [hashToken(token)])
 }
 
 /* ── OTP ─────────────────────────────────────────────────────────────────── */
@@ -177,10 +180,11 @@ interface OtpRow {
  * Keduanya diperiksa di server — tombol yang di-disable di UI bukan
  * pengaman, hanya kesopanan.
  */
-export function issueOtp(phone: string, at: Date = new Date()): OtpIssue {
-  const latest = db
-    .prepare('SELECT * FROM otp_codes WHERE phone = ? ORDER BY created_at DESC LIMIT 1')
-    .get(phone) as OtpRow | undefined
+export async function issueOtp(phone: string, at: Date = new Date()): Promise<OtpIssue> {
+  const latest = await db.get<OtpRow>(
+    'SELECT * FROM otp_codes WHERE phone = ? ORDER BY created_at DESC LIMIT 1',
+    [phone],
+  )
 
   if (latest) {
     const since = (at.getTime() - new Date(latest.created_at).getTime()) / 1000
@@ -194,22 +198,26 @@ export function issueOtp(phone: string, at: Date = new Date()): OtpIssue {
   }
 
   const hourAgo = new Date(at.getTime() - 3_600_000).toISOString()
-  const { count } = db
-    .prepare('SELECT COUNT(*) AS count FROM otp_codes WHERE phone = ? AND created_at > ?')
-    .get(phone, hourAgo) as { count: number }
+  const counted = await db.get<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM otp_codes WHERE phone = ? AND created_at > ?',
+    [phone, hourAgo],
+  )
+  // Postgres mengembalikan COUNT sebagai string; Number() menyamakan keduanya.
+  const count = Number(counted?.count ?? 0)
   if (count >= OTP_MAX_PER_HOUR) {
     return { ok: false, reason: 'rateLimit', retryAfterSeconds: 3_600 }
   }
 
   // Kode lama dianggap hangus begitu ada yang baru — hanya satu yang berlaku.
-  db.prepare('UPDATE otp_codes SET consumed = 1 WHERE phone = ? AND consumed = 0').run(phone)
+  await db.run('UPDATE otp_codes SET consumed = 1 WHERE phone = ? AND consumed = 0', [phone])
 
   const code = newOtpCode()
   const expiresAt = new Date(at.getTime() + OTP_TTL_MINUTES * 60_000).toISOString()
-  db.prepare(
+  await db.run(
     `INSERT INTO otp_codes (id, phone, code_hash, attempts, consumed, created_at, expires_at)
      VALUES (?, ?, ?, 0, 0, ?, ?)`,
-  ).run(`otp-${randomUUID()}`, phone, hashOtp(phone, code), at.toISOString(), expiresAt)
+    [`otp-${randomUUID()}`, phone, hashOtp(phone, code), at.toISOString(), expiresAt],
+  )
 
   return { ok: true, code, expiresAt }
 }
@@ -222,12 +230,15 @@ export type OtpCheck =
       attemptsLeft: number
     }
 
-export function verifyOtp(phone: string, code: string, at: Date = new Date()): OtpCheck {
-  const row = db
-    .prepare(
-      'SELECT * FROM otp_codes WHERE phone = ? AND consumed = 0 ORDER BY created_at DESC LIMIT 1',
-    )
-    .get(phone) as OtpRow | undefined
+export async function verifyOtp(
+  phone: string,
+  code: string,
+  at: Date = new Date(),
+): Promise<OtpCheck> {
+  const row = await db.get<OtpRow>(
+    'SELECT * FROM otp_codes WHERE phone = ? AND consumed = 0 ORDER BY created_at DESC LIMIT 1',
+    [phone],
+  )
 
   if (!row) return { ok: false, reason: 'notFound', attemptsLeft: 0 }
   if (new Date(row.expires_at).getTime() <= at.getTime()) {
@@ -239,77 +250,100 @@ export function verifyOtp(phone: string, code: string, at: Date = new Date()): O
 
   if (!safeEqual(row.code_hash, hashOtp(phone, code))) {
     const attempts = row.attempts + 1
-    db.prepare('UPDATE otp_codes SET attempts = ? WHERE id = ?').run(attempts, row.id)
+    await db.run('UPDATE otp_codes SET attempts = ? WHERE id = ?', [attempts, row.id])
     const left = Math.max(0, OTP_MAX_ATTEMPTS - attempts)
     // Kode dihanguskan begitu jatah tebakan habis, bukan dibiarkan hidup.
-    if (left === 0) db.prepare('UPDATE otp_codes SET consumed = 1 WHERE id = ?').run(row.id)
+    if (left === 0) await db.run('UPDATE otp_codes SET consumed = 1 WHERE id = ?', [row.id])
     return { ok: false, reason: left === 0 ? 'tooManyAttempts' : 'wrong', attemptsLeft: left }
   }
 
-  db.prepare('UPDATE otp_codes SET consumed = 1 WHERE id = ?').run(row.id)
+  await db.run('UPDATE otp_codes SET consumed = 1 WHERE id = ?', [row.id])
   return { ok: true }
 }
 
 /* ── Token email ─────────────────────────────────────────────────────────── */
 
-export function issueEmailToken(userId: string, purpose: 'verify' | 'reset'): string {
+export async function issueEmailToken(
+  userId: string,
+  purpose: 'verify' | 'reset',
+): Promise<string> {
   const token = newToken()
   const expiresAt = new Date(Date.now() + EMAIL_TOKEN_TTL_HOURS * 3_600_000).toISOString()
-  db.prepare(
+  await db.run(
     'INSERT INTO email_tokens (token_hash, user_id, purpose, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(hashToken(token), userId, purpose, now(), expiresAt)
+    [hashToken(token), userId, purpose, now(), expiresAt],
+  )
   return token
 }
 
-export function consumeEmailToken(token: string, purpose: 'verify' | 'reset'): UserRow | undefined {
+export async function consumeEmailToken(
+  token: string,
+  purpose: 'verify' | 'reset',
+): Promise<UserRow | undefined> {
   const hash = hashToken(token)
-  const row = db
-    .prepare('SELECT user_id, purpose, expires_at FROM email_tokens WHERE token_hash = ?')
-    .get(hash) as { user_id: string; purpose: string; expires_at: string } | undefined
+  const row = await db.get<{ user_id: string; purpose: string; expires_at: string }>(
+    'SELECT user_id, purpose, expires_at FROM email_tokens WHERE token_hash = ?',
+    [hash],
+  )
 
   if (!row || row.purpose !== purpose) return undefined
   if (new Date(row.expires_at).getTime() <= Date.now()) return undefined
 
   // Sekali pakai: dihapus sebelum dipakai, bukan sesudah.
-  db.prepare('DELETE FROM email_tokens WHERE token_hash = ?').run(hash)
+  await db.run('DELETE FROM email_tokens WHERE token_hash = ?', [hash])
   return findUserById(row.user_id)
 }
 
-export function markEmailVerified(userId: string): void {
-  db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(userId)
+export async function markEmailVerified(userId: string): Promise<void> {
+  await db.run('UPDATE users SET email_verified = 1 WHERE id = ?', [userId])
 }
 
 /* ── Identitas OAuth ─────────────────────────────────────────────────────── */
 
-export function findUserByIdentity(provider: string, subject: string): UserRow | undefined {
-  const row = db
-    .prepare('SELECT user_id FROM identities WHERE provider = ? AND subject = ?')
-    .get(provider, subject) as { user_id: string } | undefined
+export async function findUserByIdentity(
+  provider: string,
+  subject: string,
+): Promise<UserRow | undefined> {
+  const row = await db.get<{ user_id: string }>(
+    'SELECT user_id FROM identities WHERE provider = ? AND subject = ?',
+    [provider, subject],
+  )
   return row ? findUserById(row.user_id) : undefined
 }
 
-export function linkIdentity(
+export async function linkIdentity(
   userId: string,
   provider: string,
   subject: string,
   email: string | null,
-): void {
-  db.prepare(
-    'INSERT OR IGNORE INTO identities (id, user_id, provider, subject, email, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(`id-${randomUUID()}`, userId, provider, subject, email, now())
+): Promise<void> {
+  /*
+   * ON CONFLICT, bukan INSERT OR IGNORE: yang kedua hanya dikenal SQLite dan
+   * akan meledak di Postgres. Menyebut kolomnya juga membatasi konflik yang
+   * dimaafkan pada yang memang diharapkan — identitas yang sudah tertaut —
+   * bukan setiap pelanggaran batasan apa pun.
+   */
+  await db.run(
+    `INSERT INTO identities (id, user_id, provider, subject, email, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (provider, subject) DO NOTHING`,
+    [`id-${randomUUID()}`, userId, provider, subject, email, now()],
+  )
 }
 
-export function identitiesFor(userId: string): { provider: string; email: string | null }[] {
-  return db.prepare('SELECT provider, email FROM identities WHERE user_id = ?').all(userId) as {
-    provider: string
-    email: string | null
-  }[]
+export function identitiesFor(
+  userId: string,
+): Promise<{ provider: string; email: string | null }[]> {
+  return db.all<{ provider: string; email: string | null }>(
+    'SELECT provider, email FROM identities WHERE user_id = ?',
+    [userId],
+  )
 }
 
 /* ── Ganti sandi & cabut sesi ────────────────────────────────────────────── */
 
-export function setPassword(userId: string, passwordHash: string): void {
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId)
+export async function setPassword(userId: string, passwordHash: string): Promise<void> {
+  await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [passwordHash, userId])
 }
 
 /**
@@ -319,9 +353,9 @@ export function setPassword(userId: string, passwordHash: string): void {
  * pemiliknya perlu me-reset — tetap masuk di perangkatnya sendiri, dan
  * reset itu tidak menyelesaikan apa pun.
  */
-export function revokeAllSessions(userId: string): number {
-  const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId)
-  return Number(changes)
+export async function revokeAllSessions(userId: string): Promise<number> {
+  const { changes } = await db.run('DELETE FROM sessions WHERE user_id = ?', [userId])
+  return changes
 }
 
 /* ── Menyambung & melepas cara masuk ─────────────────────────────────────── */
@@ -335,28 +369,33 @@ export type SignInMethod = 'phone' | 'email' | 'google' | 'facebook'
  * saja. Menghitungnya akan membuat aturan "sisakan minimal satu" meloloskan
  * akun yang sebenarnya sudah terkunci.
  */
-export function signInMethods(user: UserRow): SignInMethod[] {
+export async function signInMethods(user: UserRow): Promise<SignInMethod[]> {
   const methods: SignInMethod[] = []
   if (user.phone && user.phone_verified === 1) methods.push('phone')
   if (user.email && user.password_hash) methods.push('email')
-  for (const { provider } of identitiesFor(user.id)) {
+  for (const { provider } of await identitiesFor(user.id)) {
     if (provider === 'google' || provider === 'facebook') methods.push(provider)
   }
   return methods
 }
 
-export function attachPhone(userId: string, phone: string): void {
-  db.prepare('UPDATE users SET phone = ?, phone_verified = 1 WHERE id = ?').run(phone, userId)
+export async function attachPhone(userId: string, phone: string): Promise<void> {
+  await db.run('UPDATE users SET phone = ?, phone_verified = 1 WHERE id = ?', [phone, userId])
 }
 
-export function attachEmail(userId: string, email: string, passwordHash: string | null): void {
-  db.prepare(
+export async function attachEmail(
+  userId: string,
+  email: string,
+  passwordHash: string | null,
+): Promise<void> {
+  await db.run(
     'UPDATE users SET email = ?, email_verified = 0, password_hash = COALESCE(?, password_hash) WHERE id = ?',
-  ).run(email, passwordHash, userId)
+    [email, passwordHash, userId],
+  )
 }
 
-export function detachPhone(userId: string): void {
-  db.prepare('UPDATE users SET phone = NULL, phone_verified = 0 WHERE id = ?').run(userId)
+export async function detachPhone(userId: string): Promise<void> {
+  await db.run('UPDATE users SET phone = NULL, phone_verified = 0 WHERE id = ?', [userId])
 }
 
 /**
@@ -364,23 +403,26 @@ export function detachPhone(userId: string): void {
  * masuk lewat layar mana pun, jadi meninggalkannya cuma menyisakan kredensial
  * menganggur di basis data.
  */
-export function detachEmail(userId: string): void {
-  db.prepare(
+export async function detachEmail(userId: string): Promise<void> {
+  await db.run(
     'UPDATE users SET email = NULL, email_verified = 0, password_hash = NULL WHERE id = ?',
-  ).run(userId)
+    [userId],
+  )
 }
 
-export function unlinkIdentity(userId: string, provider: string): boolean {
-  const { changes } = db
-    .prepare('DELETE FROM identities WHERE user_id = ? AND provider = ?')
-    .run(userId, provider)
-  return Number(changes) > 0
+export async function unlinkIdentity(userId: string, provider: string): Promise<boolean> {
+  const { changes } = await db.run('DELETE FROM identities WHERE user_id = ? AND provider = ?', [
+    userId,
+    provider,
+  ])
+  return changes > 0
 }
 
 /** Pemilik sebuah identitas penyedia, kalau ada — dipakai menolak rebutan. */
-export function ownerOfIdentity(provider: string, subject: string): string | null {
-  const row = db
-    .prepare('SELECT user_id FROM identities WHERE provider = ? AND subject = ?')
-    .get(provider, subject) as { user_id: string } | undefined
+export async function ownerOfIdentity(provider: string, subject: string): Promise<string | null> {
+  const row = await db.get<{ user_id: string }>(
+    'SELECT user_id FROM identities WHERE provider = ? AND subject = ?',
+    [provider, subject],
+  )
   return row?.user_id ?? null
 }
