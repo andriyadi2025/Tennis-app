@@ -297,6 +297,11 @@ export const CLUB_SETTINGS: ClubSettings = {
   serviceFeeIdr: 5_000,
   primeTime: { from: 18, to: 21, multiplier: 1.2 },
   membership: { duesMonthlyIdr: 150_000, memberDiscount: 0.2 },
+  /*
+   * Poin partisipasi per jenis kegiatan — terpisah dari poin belanja.
+   * Angkanya karangan yang masuk akal; admin bisa mengubahnya di dasbor.
+   */
+  activityPoints: { bermain: 25, berlatih: 40, mainBersama: 50, lomba: 150 },
 }
 
 export const CURRENT_USER: User = {

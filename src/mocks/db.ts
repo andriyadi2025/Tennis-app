@@ -1,6 +1,7 @@
 import type {
   AppNotification,
   Booking,
+  BookingPurpose,
   ChatThread,
   Court,
   OpenMatch,
@@ -187,6 +188,31 @@ export const store = {
   profile: structuredClone(CURRENT_USER),
 }
 
+/**
+ * Kegiatan yang poinnya sudah masuk, beserta jumlah yang benar-benar
+ * dikreditkan. Catatannya sendiri diturunkan setiap kali dibaca, jadi tanpa
+ * penanda ini poin akan dikreditkan berulang tiap halaman profil dibuka.
+ *
+ * Jumlahnya ikut disimpan, bukan cuma idnya: kalau admin menurunkan poin
+ * Lomba dari 150 ke 10, riwayat lama harus tetap menulis +150 — itu yang
+ * dulu masuk ke saldo. Menghitung ulang riwayat dengan tarif hari ini
+ * membuat catatan berbohong tentang masa lalu.
+ */
+const awardedActivities = new Map<string, number>()
+
+export function isAwarded(id: string): boolean {
+  return awardedActivities.has(id)
+}
+
+/** Poin yang dulu dikreditkan untuk kegiatan ini, atau null bila belum. */
+export function awardedPoints(id: string): number | null {
+  return awardedActivities.get(id) ?? null
+}
+
+export function markAwarded(id: string, points: number): void {
+  awardedActivities.set(id, points)
+}
+
 /** Tim dan turnamen yang sudah diikuti user di sesi ini. */
 const joinedTeams = new Set<string>()
 const registeredTournaments = new Set<string>()
@@ -226,6 +252,7 @@ function loadCollections(): void {
   store.profile = structuredClone(CURRENT_USER)
   joinedTeams.clear()
   registeredTournaments.clear()
+  awardedActivities.clear()
 }
 
 /**
@@ -295,6 +322,7 @@ function seedBooking(): Booking {
     sport: 'badminton',
     range: { startsAt: starts.toISOString(), endsAt: ends.toISOString(), hours: 2 },
     recurrence: null,
+    purpose: 'bermain',
     addOns: [],
     splitBill: {
       participants,
@@ -316,6 +344,66 @@ function seedBooking(): Booking {
   }
 }
 
+/**
+ * Booking yang sudah lewat, supaya Riwayat main di Profil punya isi sejak
+ * pertama dibuka. Ini bukan angka hiasan: catatannya diturunkan dari booking
+ * ini lewat jalur yang sama dengan booking yang user buat sendiri, jadi kalau
+ * penurunannya rusak, baris-baris ini ikut hilang.
+ */
+function seedPastBooking(
+  id: string,
+  daysAgo: number,
+  purpose: BookingPurpose,
+  courtIndex: number,
+): Booking {
+  const venue = store.venues.find((v) => v.id === 'v-dbtc') ?? store.venues[0]!
+  const court = venue.courts[courtIndex] ?? venue.courts[0]!
+  const starts = new Date()
+  starts.setDate(starts.getDate() - daysAgo)
+  starts.setHours(17, 0, 0, 0)
+  const ends = new Date(starts.getTime() + 2 * 3_600_000)
+
+  return {
+    id,
+    venueId: venue.id,
+    venueName: venue.name,
+    courtId: court.id,
+    courtName: court.name,
+    sport: venue.sport[0] ?? 'tennis',
+    range: { startsAt: starts.toISOString(), endsAt: ends.toISOString(), hours: 2 },
+    recurrence: null,
+    purpose,
+    addOns: [],
+    splitBill: null,
+    status: 'confirmed',
+    paymentMethod: 'qris',
+    code: `DBTC-${id.slice(-6).toUpperCase()}`,
+    subtotalIdr: 120_000,
+    pointsRedeemed: 0,
+    discountIdr: 0,
+    serviceFeeIdr: 5_000,
+    totalIdr: 125_000,
+    createdAt: new Date(starts.getTime() - 86_400_000).toISOString(),
+    paymentDeadline: null,
+  }
+}
+
+/** Pendaftaran turnamen yang sudah berjalan, sumber catatan "Lomba". */
+function seedRegistration(): TournamentRegistration | null {
+  const past = store.tournaments.find((t) => new Date(t.startsAt).getTime() < Date.now())
+  if (!past) return null
+  return {
+    id: 'trg-seed-1',
+    tournamentId: past.id,
+    tournamentName: past.name,
+    entryFeeIdr: past.entryFeeIdr,
+    paymentMethod: 'qris',
+    paymentStatus: 'lunas',
+    registeredAt: new Date(new Date(past.startsAt).getTime() - 3 * 86_400_000).toISOString(),
+    code: 'TRN-3H8P2K',
+  }
+}
+
 function seed(): void {
   loadCollections()
   registrations.clear()
@@ -325,6 +413,20 @@ function seed(): void {
     booking.range.startsAt,
     new Date(new Date(booking.range.startsAt).getTime() + 3_600_000).toISOString(),
   ])
+
+  for (const past of [
+    seedPastBooking('bk-seed-past-1', 4, 'bermain', 0),
+    seedPastBooking('bk-seed-past-2', 9, 'berlatih', 1),
+    seedPastBooking('bk-seed-past-3', 16, 'bermain', 0),
+  ]) {
+    bookings.set(past.id, past)
+  }
+
+  const registration = seedRegistration()
+  if (registration) {
+    registrations.set(registration.id, registration)
+    membership.register(registration.tournamentId)
+  }
 }
 
 /* ── Persistensi ──────────────────────────────────────────────────────────
@@ -335,7 +437,7 @@ function seed(): void {
 
 const SNAPSHOT_KEY = 'mock-db'
 /** Naikkan kalau bentuk data berubah, supaya snapshot lama dibuang. */
-const SNAPSHOT_VERSION = 1
+export const SNAPSHOT_VERSION = 3
 
 interface Snapshot {
   version: number
@@ -347,6 +449,8 @@ interface Snapshot {
   registrations: TournamentRegistration[]
   joinedTeams: string[]
   registeredTournaments: string[]
+  /** Pasangan [id, poin yang dikreditkan]. */
+  awardedActivities: [string, number][]
   store: typeof store
 }
 
@@ -364,6 +468,7 @@ export function persistDb(): void {
     registrations: [...registrations.values()],
     joinedTeams: [...joinedTeams],
     registeredTournaments: [...registeredTournaments],
+    awardedActivities: [...awardedActivities],
     store,
   } satisfies Snapshot)
 }
@@ -382,6 +487,14 @@ function restoreDb(): boolean {
     snapshot.registrations.forEach((r) => registrations.set(r.id, r))
     snapshot.joinedTeams.forEach((t) => joinedTeams.add(t))
     snapshot.registeredTournaments.forEach((t) => registeredTournaments.add(t))
+    // Bentuknya diperiksa, bukan dipercaya: snapshot versi lama menyimpan
+    // daftar id saja, dan mendestrukturisasi string diam-diam menghasilkan
+    // huruf pertamanya sebagai id.
+    for (const entry of snapshot.awardedActivities ?? []) {
+      if (!Array.isArray(entry)) continue
+      const [id, points] = entry
+      if (typeof id === 'string' && typeof points === 'number') awardedActivities.set(id, points)
+    }
     return true
   } catch {
     // Snapshot rusak — mulai bersih, jangan bikin app gagal boot.

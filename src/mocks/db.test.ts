@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isSlotAvailable, persistDb, resetDb, slotId, store } from './db'
+import { SNAPSHOT_VERSION, isSlotAvailable, persistDb, resetDb, slotId, store } from './db'
 import { readJson } from '@/lib/storage'
 
 interface Snapshot {
@@ -41,7 +41,9 @@ describe('persistDb', () => {
     persistDb()
     const snapshot = readJson<Snapshot | null>('mock-db', null)
     expect(snapshot).not.toBeNull()
-    expect(snapshot?.version).toBe(1)
+    // Dibandingkan dengan konstantanya, bukan angka mati: yang perlu dijaga
+    // adalah snapshot selalu bercap versi, bukan versinya kebetulan 1.
+    expect(snapshot?.version).toBe(SNAPSHOT_VERSION)
     // Booking bawaan mengunci dua jam di Lap. 3.
     expect(snapshot?.takenSlots.length).toBeGreaterThanOrEqual(2)
   })

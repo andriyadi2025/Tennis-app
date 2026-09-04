@@ -4,6 +4,9 @@ import type {
   Booking,
   ChatMessage,
   ChatThread,
+  Activity,
+  ActivityTally,
+  BookingPurpose,
   ClubSettings,
   Court,
   CourtDraft,
@@ -42,6 +45,7 @@ export const queryKeys = {
   memberships: ['memberships'] as const,
   registrations: ['tournament-registrations'] as const,
   sparring: ['sparring'] as const,
+  activities: ['activities'] as const,
   settings: ['club-settings'] as const,
   adminCourts: ['admin-courts'] as const,
   chat: (id: string) => ['chat', id] as const,
@@ -159,6 +163,7 @@ export interface CreateBookingInput {
   recurrenceWeeks: number
   addOnIds: string[]
   pointsRedeemed: number
+  purpose: BookingPurpose
 }
 
 export function useCreateBooking() {
@@ -169,6 +174,21 @@ export function useCreateBooking() {
       client.setQueryData(queryKeys.booking(booking.id), booking)
       void client.invalidateQueries({ queryKey: queryKeys.bookings })
     },
+  })
+}
+
+export interface ActivityFeed {
+  activities: Activity[]
+  tally: ActivityTally
+  matchesPlayed: number
+  pointsFromActivities: number
+}
+
+/** Catatan aktivitas; membacanya juga mengkreditkan poin yang belum masuk. */
+export function useActivities() {
+  return useQuery({
+    queryKey: queryKeys.activities,
+    queryFn: ({ signal }) => apiGet<ActivityFeed>('/api/activities', signal),
   })
 }
 
@@ -195,6 +215,7 @@ export function usePayBooking() {
     onSuccess: (booking) => {
       client.setQueryData(queryKeys.booking(booking.id), booking)
       void client.invalidateQueries({ queryKey: queryKeys.bookings })
+      void client.invalidateQueries({ queryKey: queryKeys.activities })
       // Slot yang baru dikunci membuat semua grid slot basi.
       void client.invalidateQueries({ queryKey: ['venue'] })
     },

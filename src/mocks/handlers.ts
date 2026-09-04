@@ -3,6 +3,7 @@ import type {
   AppNotification,
   Booking,
   ChatMessage,
+  BookingPurpose,
   ClubSettings,
   Court,
   CourtDraft,
@@ -17,6 +18,13 @@ import type {
 } from '@/types'
 import { computePrice } from '@/lib/pricing'
 import { tierFor } from '@/lib/points'
+import {
+  deriveActivities,
+  matchesPlayed,
+  settleActivities,
+  tallyActivities,
+  totalActivityPoints,
+} from '@/lib/activities'
 import { toRange } from '@/lib/slots'
 import { addWeeks, parseISO } from '@/lib/dates'
 import {
@@ -27,8 +35,10 @@ import {
   findCourt,
   findVenue,
   getBooking,
+  awardedPoints,
   isCursedSlot,
   isSlotAvailable,
+  markAwarded,
   listBookings,
   listRegistrations,
   membership,
@@ -107,6 +117,7 @@ interface CreateBookingBody {
   recurrenceWeeks: number
   addOnIds: string[]
   pointsRedeemed: number
+  purpose?: BookingPurpose
 }
 
 interface PayBody {
@@ -144,6 +155,12 @@ export function validateSettings(s: ClubSettings): string | null {
   if (from < 0 || from > 23 || to < 0 || to > 23) return 'Jam prime time harus antara 0 dan 23.'
   if (multiplier < 1 || multiplier > 3) return 'Pengali prime time harus antara 1 dan 3.'
 
+  for (const [kind, value] of Object.entries(s.activityPoints)) {
+    if (!Number.isInteger(value) || value < 0 || value > 1_000) {
+      return `Poin untuk "${kind}" harus bilangan bulat 0–1.000.`
+    }
+  }
+
   const { duesMonthlyIdr, memberDiscount } = s.membership
   if (duesMonthlyIdr < 0) return 'Iuran tidak boleh negatif.'
   if (memberDiscount < 0 || memberDiscount > 0.9) {
@@ -178,6 +195,44 @@ export const handlers = [
   http.get('/api/me', async () => {
     await latency()
     return HttpResponse.json(store.profile)
+  }),
+
+  /**
+   * Catatan aktivitas. Diturunkan tiap kali dibaca, lalu poin partisipasi
+   * dikreditkan sekali saja untuk kegiatan yang baru pertama muncul.
+   * Idempoten: membuka profil sepuluh kali tidak memberi poin sepuluh kali.
+   */
+  http.get('/api/activities', async () => {
+    await latency()
+    const activities = deriveActivities({
+      bookings: listBookings(),
+      openMatches: store.openMatches,
+      tournaments: store.tournaments,
+      registrations: listRegistrations(),
+      sparring: store.sparring,
+      userId: CURRENT_USER.id,
+      points: store.settings.activityPoints,
+    })
+
+    const { activities: settled, credited } = settleActivities(
+      activities,
+      awardedPoints,
+      markAwarded,
+    )
+
+    if (credited > 0) {
+      store.profile.points += credited
+      store.profile.tier = tierFor(store.profile.points)
+      persistDb()
+    }
+
+    const tally = tallyActivities(settled)
+    return HttpResponse.json({
+      activities: settled,
+      tally,
+      matchesPlayed: matchesPlayed(tally),
+      pointsFromActivities: totalActivityPoints(settled),
+    })
   }),
 
   /** Poin bertambah setelah main dan berkurang saat ditukar. */
@@ -312,6 +367,7 @@ export const handlers = [
       sport: court.sport,
       range,
       recurrence: weeks > 1 ? { weekly: true, weeks } : null,
+      purpose: body.purpose === 'berlatih' ? 'berlatih' : 'bermain',
       addOns,
       splitBill: null,
       status: 'awaitingPayment',
@@ -774,6 +830,7 @@ export const handlers = [
       openHours: { ...store.settings.openHours, ...(patch.openHours ?? {}) },
       primeTime: { ...store.settings.primeTime, ...(patch.primeTime ?? {}) },
       membership: { ...store.settings.membership, ...(patch.membership ?? {}) },
+      activityPoints: { ...store.settings.activityPoints, ...(patch.activityPoints ?? {}) },
     }
 
     const problem = validateSettings(next)

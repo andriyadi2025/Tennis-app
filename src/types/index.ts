@@ -165,6 +165,8 @@ export interface Booking {
   sport: Sport
   range: BookingRange
   recurrence: Recurrence | null
+  /** Menentukan kegiatannya tercatat sebagai Bermain atau Berlatih. */
+  purpose: BookingPurpose
   addOns: AddOn[]
   splitBill: SplitBill | null
   status: BookingStatus
@@ -330,6 +332,8 @@ export interface ClubSettings {
   serviceFeeIdr: number
   primeTime: PrimeTime
   membership: MembershipSettings
+  /** Poin partisipasi per jenis kegiatan. */
+  activityPoints: ActivityPoints
 }
 
 /** Lapangan seperti yang diisi admin — belum punya id sampai disimpan. */
@@ -340,6 +344,56 @@ export interface CourtDraft {
   surface: string
   /** Kosong berarti ikut tarif dasar klub. */
   pricePerHourIdr: number | null
+}
+
+/* ── Catatan aktivitas ────────────────────────────────────────────────────
+ * Empat jenis kegiatan yang dicatat klub. Catatannya **diturunkan** dari
+ * data yang sudah ada — booking lunas, open match yang diikuti, pendaftaran
+ * turnamen, ajakan sparring yang diterima — bukan ditulis terpisah. Satu
+ * sumber kebenaran berarti tidak ada catatan yang bisa menyimpang dari
+ * kejadiannya.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export type ActivityKind = 'bermain' | 'berlatih' | 'mainBersama' | 'lomba'
+
+export const ACTIVITY_LABEL: Record<ActivityKind, string> = {
+  bermain: 'Bermain',
+  berlatih: 'Berlatih',
+  mainBersama: 'Main bersama',
+  lomba: 'Lomba',
+}
+
+/** Dari mana catatan ini berasal; dipakai supaya tidak tercatat dua kali. */
+export type ActivitySource = 'booking' | 'openMatch' | 'tournament' | 'sparring'
+
+export interface Activity {
+  /** `sumber:id` — stabil, jadi poinnya tidak pernah dikreditkan dobel. */
+  id: string
+  kind: ActivityKind
+  source: ActivitySource
+  sourceId: string
+  title: string
+  sport: Sport
+  occurredAt: string
+  venueName: string | null
+  /** Nama orang atau tim yang ikut, kalau ada. */
+  withNames: string[]
+  /** Poin partisipasi untuk jenis ini saat kegiatannya tercatat. */
+  pointsEarned: number
+}
+
+/** Ringkasan per jenis untuk ditampilkan di profil. */
+export type ActivityTally = Record<ActivityKind, number>
+
+/** Poin partisipasi per jenis kegiatan — diatur admin. */
+export type ActivityPoints = Record<ActivityKind, number>
+
+/** Tujuan sebuah booking: main biasa atau latihan. */
+export type BookingPurpose = 'bermain' | 'berlatih'
+
+export const PURPOSE_LABEL: Record<BookingPurpose, string> = {
+  bermain: 'Main biasa',
+  berlatih: 'Latihan',
 }
 
 export type SparringStatus = 'menunggu' | 'diterima' | 'ditolak'
