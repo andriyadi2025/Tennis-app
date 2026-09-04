@@ -2,9 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "lapangin",
+      "name": "dbtc",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "autoPort": true,
       "port": 5173
     }
