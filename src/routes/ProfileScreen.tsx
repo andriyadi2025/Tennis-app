@@ -15,13 +15,14 @@ import {
   Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { SPORT_LABEL } from '@/types'
-import { useMe } from '@/hooks/queries'
+import type { Activity, ActivityKind, ActivityTally } from '@/types'
+import { ACTIVITY_LABEL, SPORT_LABEL } from '@/types'
+import { useActivities, useMe } from '@/hooks/queries'
 import { useAuthStore } from '@/store/auth'
 import { resendVerification } from '@/lib/authApi'
 import { useToast } from '@/hooks/useToast'
 import { tierProgress } from '@/lib/points'
-import { formatMonthYear } from '@/lib/dates'
+import { formatDateShort, formatMonthYear, formatRelative } from '@/lib/dates'
 import { Screen, SectionHeading } from '@/components/layout/Screen'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
@@ -51,6 +52,7 @@ export function ProfileScreen() {
   const signOut = useAuthStore((s) => s.signOut)
   const navigate = useNavigate()
   const profile = useMe()
+  const feed = useActivities()
   const { toast, show } = useToast()
 
   if (profile.isLoading && !profile.data) {
@@ -87,7 +89,8 @@ export function ProfileScreen() {
             {account.phone ?? account.email ?? 'Belum ada kontak'}
           </p>
           <Chip tone="sage" className="self-start">
-            {SPORT_LABEL[play.favouriteSport]} · {play.matchesPlayed} main
+            {/* Dihitung dari catatan aktivitas, bukan angka yang ditanam. */}
+            {SPORT_LABEL[play.favouriteSport]} · {feed.data?.matchesPlayed ?? 0} main
           </Chip>
         </div>
       </section>
@@ -146,6 +149,8 @@ export function ProfileScreen() {
         </Link>
       )}
 
+      <ActivitySection feed={feed} />
+
       <section className="flex flex-col gap-2.5">
         <h2 className="text-3xl">Akun</h2>
         <ul className="flex flex-col gap-2">
@@ -182,6 +187,98 @@ export function ProfileScreen() {
         </p>
       </div>
     </Screen>
+  )
+}
+
+const KIND_TONE: Record<ActivityKind, 'accent' | 'sage' | 'neutral'> = {
+  bermain: 'accent',
+  berlatih: 'sage',
+  mainBersama: 'sage',
+  lomba: 'accent',
+}
+
+/**
+ * Riwayat main. Catatannya diturunkan dari booking, open match, turnamen, dan
+ * sparring yang sudah terjadi — jadi tidak bisa menyimpang dari kejadiannya.
+ */
+function ActivitySection({ feed }: { feed: ReturnType<typeof useActivities> }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="text-3xl">Riwayat main</h2>
+
+      {feed.isLoading ? (
+        <SkeletonBlock className="h-40 w-full rounded-lg" />
+      ) : feed.error ? (
+        <ErrorState body={feed.error.message} onRetry={() => void feed.refetch()} />
+      ) : feed.data && feed.data.activities.length > 0 ? (
+        <>
+          <Tally tally={feed.data.tally} />
+          <p className="text-base text-neutral-700">
+            {feed.data.pointsFromActivities.toLocaleString('id-ID')} poin dari partisipasi, terpisah
+            dari poin belanja.
+          </p>
+          <ul className="flex flex-col gap-2">
+            {feed.data.activities.slice(0, 8).map((activity) => (
+              <li key={activity.id}>
+                <ActivityRow activity={activity} />
+              </li>
+            ))}
+          </ul>
+          {feed.data.activities.length > 8 && (
+            <p className="text-sm text-neutral-600">
+              +{feed.data.activities.length - 8} kegiatan lain
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col gap-2 rounded-lg bg-surface px-5 py-6 text-center">
+          <h3 className="text-xl">Belum ada kegiatan</h3>
+          <p className="text-base text-neutral-700">
+            Booking, open match, turnamen, dan sparring yang sudah selesai muncul di sini beserta
+            poinnya.
+          </p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function Tally({ tally }: { tally: ActivityTally }) {
+  const kinds = Object.keys(ACTIVITY_LABEL) as ActivityKind[]
+  return (
+    <dl className="grid grid-cols-4 gap-2">
+      {kinds.map((kind) => (
+        <div key={kind} className="flex flex-col items-center gap-0.5 rounded-md bg-surface py-3">
+          <dd className="font-heading text-2xl">{tally[kind]}</dd>
+          <dt className="px-1 text-center text-xs leading-tight text-neutral-700">
+            {ACTIVITY_LABEL[kind]}
+          </dt>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ActivityRow({ activity }: { activity: Activity }) {
+  return (
+    <article className="flex items-start gap-3 rounded-md bg-surface px-4 py-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <Chip tone={KIND_TONE[activity.kind]}>{ACTIVITY_LABEL[activity.kind]}</Chip>
+          <span className="text-sm text-neutral-600">{formatRelative(activity.occurredAt)}</span>
+        </div>
+        <span className="truncate text-base font-semibold">{activity.title}</span>
+        <span className="truncate text-sm text-neutral-700">
+          {formatDateShort(activity.occurredAt)}
+          {activity.withNames.length > 0 &&
+            ` · bareng ${activity.withNames.slice(0, 3).join(', ')}`}
+          {activity.withNames.length > 3 && ` +${activity.withNames.length - 3}`}
+        </span>
+      </div>
+      <span className="shrink-0 font-heading text-base text-accent-700">
+        +{activity.pointsEarned}
+      </span>
+    </article>
   )
 }
 

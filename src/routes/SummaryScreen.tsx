@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Check, Minus, Plus, Sparkles, Users } from 'lucide-react'
-import type { SplitParticipant } from '@/types'
-import { useAddOns, useCreateBooking, useMe, useSlots } from '@/hooks/queries'
+import type { BookingPurpose, SplitParticipant } from '@/types'
+import { PURPOSE_LABEL } from '@/types'
+import { useAddOns, useClubSettings, useCreateBooking, useMe, useSlots } from '@/hooks/queries'
 import { useDraftStore } from '@/store/draft'
 import { computePrice } from '@/lib/pricing'
 import { maxRedeemablePoints, pointsEarned, redeemPoints, REDEEM_STEP_POINTS } from '@/lib/points'
@@ -24,6 +25,7 @@ export function SummaryScreen() {
   const balance = me?.points ?? 0
 
   const addOns = useAddOns()
+  const settings = useClubSettings()
   const activeDate = draft.date ? parseISO(draft.date) : new Date()
   const slots = useSlots(draft.venueId ?? undefined, draft.courtId ?? undefined, activeDate)
   const createBooking = useCreateBooking()
@@ -91,6 +93,7 @@ export function SummaryScreen() {
         recurrenceWeeks: draft.recurrenceWeeks,
         addOnIds: draft.addOnIds,
         pointsRedeemed: redeem.points,
+        purpose: draft.purpose,
       },
       {
         onSuccess: (booking) => {
@@ -156,6 +159,34 @@ export function SummaryScreen() {
           <Row label="Jam" value={describeSelection(draft.startsAt)} />
           <Row label="Durasi" value={`${draft.startsAt.length} jam`} />
         </dl>
+      </section>
+
+      {/* Tujuan booking — menentukan kegiatannya tercatat sebagai apa */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-3xl">Tujuan</h2>
+        <p className="text-base text-neutral-700">
+          Menentukan kegiatan ini tercatat sebagai apa di riwayat main kamu.
+        </p>
+        <div className="flex gap-2.5">
+          {(Object.keys(PURPOSE_LABEL) as BookingPurpose[]).map((purpose) => (
+            <button
+              key={purpose}
+              type="button"
+              aria-pressed={draft.purpose === purpose}
+              onClick={() => draft.setPurpose(purpose)}
+              className={
+                draft.purpose === purpose
+                  ? 'flex min-h-touch flex-1 flex-col items-center justify-center gap-0.5 rounded-lg bg-accent px-4 py-3 text-bg'
+                  : 'flex min-h-touch flex-1 flex-col items-center justify-center gap-0.5 rounded-lg bg-surface px-4 py-3'
+              }
+            >
+              <span className="font-heading text-md">{PURPOSE_LABEL[purpose]}</span>
+              <span className="text-sm opacity-80">
+                +{settings.data?.activityPoints[purpose] ?? 0} poin
+              </span>
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* Tambahan */}

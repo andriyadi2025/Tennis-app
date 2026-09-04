@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import type { ActivityKind } from '@/types'
+import { ACTIVITY_LABEL } from '@/types'
 import { useClubSettings, useSaveClubSettings } from '@/hooks/queries'
 import { useToast } from '@/hooks/useToast'
 import { formatIdr } from '@/lib/money'
@@ -23,6 +25,7 @@ export function AdminPricingScreen() {
   const [to, setTo] = useState('')
   const [multiplier, setMultiplier] = useState('')
   const [dues, setDues] = useState('')
+  const [activity, setActivity] = useState<Record<string, string>>({})
   const [discount, setDiscount] = useState('')
 
   // Form diisi dari server sekali data tiba, bukan ditebak dari nilai kosong.
@@ -36,6 +39,9 @@ export function AdminPricingScreen() {
     setMultiplier(String(Math.round(s.primeTime.multiplier * 100)))
     setDues(String(s.membership.duesMonthlyIdr))
     setDiscount(String(Math.round(s.membership.memberDiscount * 100)))
+    setActivity(
+      Object.fromEntries(Object.entries(s.activityPoints).map(([k, v]) => [k, String(v)])),
+    )
   }, [settings.data])
 
   if (settings.isLoading) {
@@ -79,6 +85,12 @@ export function AdminPricingScreen() {
         membership: {
           duesMonthlyIdr: Number(dues),
           memberDiscount: Number(discount) / 100,
+        },
+        activityPoints: {
+          bermain: Number(activity.bermain ?? 0),
+          berlatih: Number(activity.berlatih ?? 0),
+          mainBersama: Number(activity.mainBersama ?? 0),
+          lomba: Number(activity.lomba ?? 0),
         },
       },
       { onSuccess: () => show('Tarif disimpan.') },
@@ -171,6 +183,25 @@ export function AdminPricingScreen() {
             <strong className="font-heading text-accent-700">{formatIdr(memberPrice)}</strong>/jam
             di jam biasa.
           </p>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h2 className="text-3xl">Poin partisipasi</h2>
+          <p className="text-base text-neutral-700">
+            Poin yang didapat anggota tiap kali sebuah kegiatan selesai. Terpisah dari poin belanja,
+            yang tetap 1 poin per Rp1.000.
+          </p>
+          {(Object.keys(ACTIVITY_LABEL) as ActivityKind[]).map((kind) => (
+            <NumberField
+              key={kind}
+              label={ACTIVITY_LABEL[kind]}
+              suffix="poin"
+              min={0}
+              max={1000}
+              value={activity[kind] ?? ''}
+              onChange={(next) => setActivity((current) => ({ ...current, [kind]: next }))}
+            />
+          ))}
         </section>
 
         {save.error && (

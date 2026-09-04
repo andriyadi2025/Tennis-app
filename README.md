@@ -305,8 +305,8 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm run verify:all` menjalankan keduanya — **211 tes**: 168 frontend
-(19 berkas) dan 43 server (2 berkas).
+`npm run verify:all` menjalankan keduanya — **235 tes**: 192 frontend
+(20 berkas) dan 43 server (2 berkas).
 
 Tes server menembak app Express yang sama dengan yang dijalankan produksi,
 lewat HTTP sungguhan — jadi yang diuji bukan cuma logikanya tapi juga
@@ -437,6 +437,57 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
   usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
 
+## Poin & riwayat main
+
+Ada **dua sumber poin** yang sengaja dipisah:
+
+| Sumber           | Aturan                          | Diatur di      |
+| ---------------- | ------------------------------- | -------------- |
+| Poin belanja     | 1 poin per Rp1.000 yang dibayar | tetap          |
+| Poin partisipasi | per kegiatan yang selesai       | Dasbor → Tarif |
+
+Poin partisipasi bawaan: Bermain 25, Berlatih 40, Main bersama 50, Lomba 150.
+Semuanya bisa diubah admin di **Dasbor klub → Tarif & iuran → Poin partisipasi**.
+
+### Kegiatan dicatat, bukan diketik
+
+Empat jenis kegiatan muncul sendiri di Profil → **Riwayat main**:
+
+| Jenis        | Datang dari                                          |
+| ------------ | ---------------------------------------------------- |
+| Bermain      | booking lunas bertujuan "main", setelah jamnya lewat |
+| Berlatih     | booking lunas bertujuan "latihan"                    |
+| Main bersama | open match yang diikuti, dan sparring yang diterima  |
+| Lomba        | pendaftaran turnamen, setelah turnamennya mulai      |
+
+Tujuan booking dipilih user di layar Ringkasan — itu satu-satunya masukan
+manual. Tidak ada layar "catat kegiatan": kalau kegiatan harus diketik ulang,
+catatannya akan selalu tertinggal dari kenyataan.
+
+### Kenapa diturunkan, bukan disimpan
+
+`src/lib/activities.ts` **menurunkan** catatan dari booking, open match,
+turnamen, dan sparring setiap kali dibaca — tidak ada tabel `activities`.
+
+Dua tempat menyimpan hal yang sama akan menyimpang: booking dibatalkan tapi
+catatannya tertinggal, atau sebaliknya. Dengan diturunkan, catatan tidak bisa
+berbeda dari kejadiannya, dan booking lama ikut tercatat surut tanpa migrasi.
+
+Tiga aturan yang menahan penyalahgunaan dan kebohongan angka:
+
+- **Belum terjadi, belum dihitung.** Booking minggu depan bukan kegiatan yang
+  sudah dilakukan. Kalau dihitung, orang bisa memanen poin lalu membatalkannya.
+- **Sekali kredit saja.** Tiap kegiatan punya id stabil (`booking:bk-1`).
+  Membuka Profil sepuluh kali tidak memberi poin sepuluh kali.
+- **Riwayat memakai angka yang dulu masuk.** Kalau admin menurunkan poin Lomba
+  dari 150 ke 10, baris lama tetap menulis +150 — itu yang benar-benar masuk ke
+  saldo. Menghitung ulang riwayat dengan tarif hari ini membuat catatan
+  berbohong tentang masa lalu.
+
+Angka "x main" di kartu profil ikut turunan ini (Bermain + Main bersama +
+Lomba; Berlatih tidak dihitung sebagai main). Sebelumnya itu angka mati yang
+tidak pernah berubah berapa kali pun user main.
+
 ## Dasbor admin klub
 
 Data klub tidak lagi ditanam di kode. Admin mengisinya sendiri lewat **Profil →
@@ -472,6 +523,12 @@ tarifnya bulat — supaya ketahuan bahwa itu belum data DBTC. Dasbor menandainya
 Venue **selain** klub (GOR Cendana dan kawan-kawan) masih data contoh Bandung
 dan tidak bisa diubah dari dasbor; itu memang milik pihak lain di dalam cerita
 app ini.
+
+Riwayat main bawaan (tiga booking lewat dan satu turnamen) adalah data contoh,
+supaya Riwayat main tidak tampak kosong saat pertama dibuka. Semuanya melewati
+penurunan yang sama dengan kegiatan sungguhan — bukan angka yang ditulis
+langsung ke layar. Hapus dari `seed()` di `src/mocks/db.ts` kalau app dipakai
+dengan data asli.
 
 Masih berguna kalau ada: **foto lapangan asli** (minimal 3, rasio 4:3) untuk
 menggantikan blok warna placeholder, ketentuan pembatalan, dan aturan poin

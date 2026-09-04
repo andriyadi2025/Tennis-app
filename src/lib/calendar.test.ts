@@ -16,6 +16,7 @@ function booking(overrides: Partial<Booking> = {}): Booking {
       hours: 2,
     },
     recurrence: null,
+    purpose: 'bermain',
     addOns: [],
     splitBill: null,
     status: 'confirmed',

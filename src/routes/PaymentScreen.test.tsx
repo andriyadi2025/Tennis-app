@@ -21,6 +21,7 @@ function bookingWithDeadline(deadline: Date): Booking {
     sport: 'badminton',
     range: { startsAt: starts.toISOString(), endsAt: ends.toISOString(), hours: 2 },
     recurrence: null,
+    purpose: 'bermain',
     addOns: [],
     splitBill: null,
     status: 'awaitingPayment',

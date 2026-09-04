@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Booking, Sport, SplitBill, SplitParticipant } from '@/types'
+import type { Booking, BookingPurpose, Sport, SplitBill, SplitParticipant } from '@/types'
 import { STORAGE_KEYS, readJson, remove, writeJson } from '@/lib/storage'
 import { computeSplit } from '@/lib/split'
 
@@ -29,6 +29,8 @@ interface DraftSelection {
   recurrenceWeeks: number
   addOnIds: string[]
   pointsRedeemed: number
+  /** Menentukan kegiatannya tercatat sebagai Bermain atau Berlatih. */
+  purpose: BookingPurpose
 }
 
 interface PersistedDraft extends DraftSelection {
@@ -45,6 +47,7 @@ interface DraftState extends PersistedDraft {
   setSelection: (startsAt: string[]) => void
   setRecurrenceWeeks: (weeks: number) => void
   toggleAddOn: (id: string) => void
+  setPurpose: (purpose: BookingPurpose) => void
   setPointsRedeemed: (points: number) => void
 
   goToSummary: () => void
@@ -71,6 +74,7 @@ const EMPTY: PersistedDraft = {
   recurrenceWeeks: 1,
   addOnIds: [],
   pointsRedeemed: 0,
+  purpose: 'bermain',
   stage: 'draft',
   bookingId: null,
   paymentDeadline: null,
@@ -93,6 +97,7 @@ function snapshot(s: DraftState): PersistedDraft {
     recurrenceWeeks: s.recurrenceWeeks,
     addOnIds: s.addOnIds,
     pointsRedeemed: s.pointsRedeemed,
+    purpose: s.purpose,
     stage: s.stage,
     bookingId: s.bookingId,
     paymentDeadline: s.paymentDeadline,
@@ -200,6 +205,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       bookingId: null,
       paymentDeadline: null,
     }
+    set(next)
+    persist(next)
+  },
+
+  setPurpose: (purpose) => {
+    const next: PersistedDraft = { ...snapshot(get()), purpose }
     set(next)
     persist(next)
   },
