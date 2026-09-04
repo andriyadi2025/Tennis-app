@@ -1,10 +1,14 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import {
+  AtSign,
   Bell,
+  BadgeCheck,
   ChevronRight,
   CreditCard,
   Settings,
   ShieldCheck,
+  Smartphone,
   Sparkles,
   Swords,
   Trophy,
@@ -14,11 +18,14 @@ import type { LucideIcon } from 'lucide-react'
 import { SPORT_LABEL } from '@/types'
 import { useMe } from '@/hooks/queries'
 import { useAuthStore } from '@/store/auth'
+import { resendVerification } from '@/lib/authApi'
+import { useToast } from '@/hooks/useToast'
 import { tierProgress } from '@/lib/points'
 import { formatMonthYear } from '@/lib/dates'
 import { Screen, SectionHeading } from '@/components/layout/Screen'
 import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
+import { Toast } from '@/components/ui/Toast'
 import { Avatar, Chip, ProgressBar } from '@/components/ui/primitives'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
 
@@ -31,14 +38,22 @@ const MENU: { to: string; label: string; icon: LucideIcon }[] = [
   { to: '/settings', label: 'Pengaturan', icon: Settings },
 ]
 
-/** 10 · Profil & poin loyalitas. */
+/**
+ * 10 · Profil & poin.
+ *
+ * Dua sumber, sengaja tidak dicampur: identitas (nama, nomor, email, status
+ * verifikasi, peran) datang dari server auth; profil main (poin, tier, cabang
+ * favorit) datang dari layanan domain. Menggabungkannya jadi satu objek akan
+ * menyembunyikan bahwa yang satu sudah nyata dan yang lain masih tiruan.
+ */
 export function ProfileScreen() {
-  const stored = useAuthStore((s) => s.user)
+  const account = useAuthStore((s) => s.user)
   const signOut = useAuthStore((s) => s.signOut)
-  const me = useMe()
-  const user = me.data ?? stored
+  const navigate = useNavigate()
+  const profile = useMe()
+  const { toast, show } = useToast()
 
-  if (me.isLoading && !user) {
+  if (profile.isLoading && !profile.data) {
     return (
       <Screen>
         <SectionHeading title="Profil" />
@@ -48,31 +63,36 @@ export function ProfileScreen() {
     )
   }
 
-  if (!user) {
+  if (!account || !profile.data) {
     return (
       <Screen>
         <SectionHeading title="Profil" />
-        <ErrorState body="Data profil tidak tersedia." onRetry={() => void me.refetch()} />
+        <ErrorState body="Data profil tidak tersedia." onRetry={() => void profile.refetch()} />
       </Screen>
     )
   }
 
-  const progress = tierProgress(user.points)
+  const play = profile.data
+  const progress = tierProgress(play.points)
 
   return (
-    <Screen>
+    <Screen overlay={<Toast toast={toast} />}>
       <SectionHeading title="Profil" />
 
       <section className="flex items-center gap-4 rounded-lg bg-surface p-4">
-        <Avatar name={user.name} size={64} tone="accent" />
+        <Avatar name={account.name} size={64} tone="accent" />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h2 className="truncate text-2xl">{user.name}</h2>
-          <p className="truncate text-base text-neutral-700">{user.phone}</p>
+          <h2 className="truncate text-2xl">{account.name}</h2>
+          <p className="truncate text-base text-neutral-700">
+            {account.phone ?? account.email ?? 'Belum ada kontak'}
+          </p>
           <Chip tone="sage" className="self-start">
-            {SPORT_LABEL[user.favouriteSport]} · {user.matchesPlayed} main
+            {SPORT_LABEL[play.favouriteSport]} · {play.matchesPlayed} main
           </Chip>
         </div>
       </section>
+
+      <IdentitySection account={account} onDone={show} />
 
       {/* Poin & tier */}
       <section className="flex flex-col gap-4 rounded-lg bg-accent-700 p-5 text-accent-100">
@@ -80,7 +100,7 @@ export function ProfileScreen() {
           <div className="flex flex-col gap-1">
             <span className="text-base">Poin DBTC</span>
             <span className="font-heading text-4xl text-bg">
-              {user.points.toLocaleString('id-ID')}
+              {play.points.toLocaleString('id-ID')}
             </span>
           </div>
           <span className="flex h-12 w-12 items-center justify-center rounded-pill bg-accent-600 text-bg">
@@ -110,8 +130,7 @@ export function ProfileScreen() {
         </p>
       </section>
 
-      {/* Pintu masuk dasbor — hanya ada kalau akunnya memang admin klub. */}
-      {user.role === 'admin' && (
+      {account.role === 'admin' && (
         <Link
           to="/admin"
           className="flex min-h-touch items-center gap-3.5 rounded-lg bg-accent2-700 px-4 py-3.5 text-accent2-100"
@@ -148,13 +167,118 @@ export function ProfileScreen() {
       </section>
 
       <div className="flex flex-col gap-2">
-        <Button variant="secondary" block onClick={signOut}>
+        <Button
+          variant="secondary"
+          block
+          onClick={() => {
+            signOut()
+            navigate('/login', { replace: true })
+          }}
+        >
           Keluar
         </Button>
         <p className="text-center text-sm text-neutral-600">
-          Anggota sejak {formatMonthYear(user.joinedAt)}
+          Anggota sejak {formatMonthYear(account.createdAt)}
         </p>
       </div>
     </Screen>
+  )
+}
+
+/** Kontak dan status verifikasinya — datanya dari server auth. */
+function IdentitySection({
+  account,
+  onDone,
+}: {
+  account: NonNullable<ReturnType<typeof useAuthStore.getState>['user']>
+  onDone: (message: string, tone?: 'sukses' | 'gagal') => void
+}) {
+  const token = useAuthStore((s) => s.token)
+  const identities = useAuthStore((s) => s.identities)
+
+  const resend = useMutation({
+    mutationFn: () => resendVerification(token ?? ''),
+    onSuccess: (result) =>
+      onDone(
+        result.devToken
+          ? `Mode pengembangan — token: ${result.devToken}`
+          : 'Email verifikasi dikirim ulang.',
+      ),
+    onError: (error) => onDone(error.message, 'gagal'),
+  })
+
+  return (
+    <section className="flex flex-col gap-2.5">
+      <h2 className="text-3xl">Cara masuk</h2>
+
+      {account.phone && (
+        <ContactRow
+          icon={Smartphone}
+          label={account.phone}
+          verified={account.phoneVerified}
+          note={account.phoneVerified ? 'Terverifikasi lewat OTP' : 'Belum terverifikasi'}
+        />
+      )}
+
+      {account.email && (
+        <div className="flex flex-col gap-2">
+          <ContactRow
+            icon={AtSign}
+            label={account.email}
+            verified={account.emailVerified}
+            note={account.emailVerified ? 'Terverifikasi' : 'Belum terverifikasi'}
+          />
+          {!account.emailVerified && (
+            <Button
+              variant="secondary"
+              block
+              disabled={resend.isPending}
+              onClick={() => resend.mutate()}
+            >
+              {resend.isPending ? 'Mengirim…' : 'Kirim ulang email verifikasi'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {identities.map((identity) => (
+        <ContactRow
+          key={identity.provider}
+          icon={BadgeCheck}
+          label={identity.provider === 'google' ? 'Google' : 'Facebook'}
+          verified
+          note={identity.email ?? 'Tertaut'}
+        />
+      ))}
+
+      {!account.phone && !account.email && identities.length === 0 && (
+        <p className="text-base text-neutral-700">Belum ada kontak yang tercatat.</p>
+      )}
+    </section>
+  )
+}
+
+function ContactRow({
+  icon,
+  label,
+  verified,
+  note,
+}: {
+  icon: LucideIcon
+  label: string
+  verified: boolean
+  note: string
+}) {
+  return (
+    <div className="flex min-h-touch items-center gap-3.5 rounded-md bg-surface px-4 py-3">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill bg-neutral-200 text-neutral-800">
+        <Icon icon={icon} size={18} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-base font-semibold">{label}</span>
+        <span className="text-sm text-neutral-700">{note}</span>
+      </span>
+      <Chip tone={verified ? 'sage' : 'accent'}>{verified ? 'Terverifikasi' : 'Belum'}</Chip>
+    </div>
   )
 }

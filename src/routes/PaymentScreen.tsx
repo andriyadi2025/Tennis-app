@@ -4,9 +4,8 @@ import clsx from 'clsx'
 import { QrCode } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 import { PAYMENT_LABEL } from '@/types'
-import { useBooking, usePayBooking } from '@/hooks/queries'
+import { useAdjustPoints, useBooking, usePayBooking } from '@/hooks/queries'
 import { useDraftStore } from '@/store/draft'
-import { useAuthStore } from '@/store/auth'
 import { pointsEarned } from '@/lib/points'
 import { formatCountdown, formatDateShort, formatHourRange } from '@/lib/dates'
 import { formatIdr } from '@/lib/money'
@@ -41,7 +40,7 @@ function useCountdown(deadlineIso: string | null): number {
 export function PaymentScreen() {
   const navigate = useNavigate()
   const draft = useDraftStore()
-  const adjustPoints = useAuthStore((s) => s.adjustPoints)
+  const adjustPoints = useAdjustPoints()
   const booking = useBooking(draft.bookingId ?? undefined)
   const pay = usePayBooking()
 
@@ -66,7 +65,7 @@ export function PaymentScreen() {
         onSuccess: (confirmed) => {
           draft.confirm()
           // Poin yang ditukar berkurang, poin dari transaksi bertambah.
-          adjustPoints(
+          adjustPoints.mutate(
             pointsEarned(confirmed.subtotalIdr - confirmed.discountIdr) - confirmed.pointsRedeemed,
           )
           navigate(`/booking/${confirmed.id}/ticket`, { replace: true })

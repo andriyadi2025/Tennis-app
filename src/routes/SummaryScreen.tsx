@@ -4,7 +4,6 @@ import { Check, Minus, Plus, Sparkles, Users } from 'lucide-react'
 import type { SplitParticipant } from '@/types'
 import { useAddOns, useCreateBooking, useMe, useSlots } from '@/hooks/queries'
 import { useDraftStore } from '@/store/draft'
-import { useAuthStore } from '@/store/auth'
 import { computePrice } from '@/lib/pricing'
 import { maxRedeemablePoints, pointsEarned, redeemPoints, REDEEM_STEP_POINTS } from '@/lib/points'
 import { amountFor } from '@/lib/split'
@@ -21,9 +20,8 @@ import { ErrorState } from '@/components/ui/states'
 export function SummaryScreen() {
   const navigate = useNavigate()
   const draft = useDraftStore()
-  const user = useAuthStore((s) => s.user)
   const { data: me } = useMe()
-  const balance = me?.points ?? user?.points ?? 0
+  const balance = me?.points ?? 0
 
   const addOns = useAddOns()
   const activeDate = draft.date ? parseISO(draft.date) : new Date()
@@ -55,7 +53,7 @@ export function SummaryScreen() {
   // Jumlah orang berubah → nominal per orang ikut dihitung ulang.
   useEffect(() => {
     if (!splitOn) return
-    const participants = draft.splitBill?.participants ?? defaultParticipants(user?.name)
+    const participants = draft.splitBill?.participants ?? defaultParticipants(me?.name)
     draft.setSplitParticipants(participants, price.totalIdr)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitOn, price.totalIdr])
