@@ -1,0 +1,26 @@
+{
+  "name": "dbtc-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend autentikasi Dukuh Bima Tennis Club",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --watch --experimental-strip-types src/index.ts",
+    "start": "node --env-file-if-exists=.env --experimental-strip-types src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "nodemailer": "^6.10.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/nodemailer": "^6.4.24",
+    "typescript": "~5.9.2",
+    "vitest": "^4.1.11"
+  }
+}
