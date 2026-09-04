@@ -426,3 +426,72 @@ export async function ownerOfIdentity(provider: string, subject: string): Promis
   )
   return row?.user_id ?? null
 }
+
+/* ── Penggabungan akun ───────────────────────────────────────────────────── */
+
+export interface ContactMove {
+  /** Kontak yang benar-benar pindah ke akun tujuan. */
+  moved: ('phone' | 'email')[]
+  /** Kontak akun sumber yang dilepas karena slotnya sudah terisi. */
+  released: ('phone' | 'email')[]
+}
+
+/**
+ * Memindahkan identitas OAuth dan kontak dari satu akun ke akun lain.
+ *
+ * Tabel `users` hanya memuat satu nomor dan satu email, jadi kontak yang
+ * slotnya sudah terisi di akun tujuan **tidak bisa** ikut pindah. Yang
+ * dilakukan bukan menimpanya diam-diam — kontak itu dilepas dan dilaporkan,
+ * supaya orangnya tahu cara masuk mana yang hilang.
+ */
+export async function mergeAuthData(fromUserId: string, toUserId: string): Promise<ContactMove> {
+  const from = await findUserById(fromUserId)
+  const to = await findUserById(toUserId)
+  if (!from || !to) throw new Error('Akun untuk digabungkan tidak ditemukan.')
+
+  const move: ContactMove = { moved: [], released: [] }
+
+  await db.transaction(async (tx) => {
+    /*
+     * Kontak dikosongkan dari akun sumber lebih dulu. Kolomnya UNIQUE, jadi
+     * menulisnya ke akun tujuan sementara akun sumber masih memegangnya akan
+     * ditolak basis data.
+     */
+    await tx.run('UPDATE users SET phone = NULL, email = NULL WHERE id = ?', [fromUserId])
+
+    if (from.phone && !to.phone) {
+      await tx.run('UPDATE users SET phone = ?, phone_verified = ? WHERE id = ?', [
+        from.phone,
+        from.phone_verified,
+        toUserId,
+      ])
+      move.moved.push('phone')
+    } else if (from.phone) {
+      move.released.push('phone')
+    }
+
+    if (from.email && !to.email) {
+      await tx.run(
+        'UPDATE users SET email = ?, email_verified = ?, password_hash = COALESCE(password_hash, ?) WHERE id = ?',
+        [from.email, from.email_verified, from.password_hash, toUserId],
+      )
+      move.moved.push('email')
+    } else if (from.email) {
+      move.released.push('email')
+    }
+
+    /*
+     * Identitas penyedia pindah semuanya. Tidak ada bentrok yang mungkin:
+     * kuncinya (provider, subject) dan akun sumber yang memegangnya.
+     */
+    await tx.run('UPDATE identities SET user_id = ? WHERE user_id = ?', [toUserId, fromUserId])
+
+    // Sesi akun sumber dicabut sebelum akunnya hilang — perangkat yang masih
+    // memegangnya harus masuk lagi, bukan menemui akun yang tidak ada.
+    await tx.run('DELETE FROM sessions WHERE user_id = ?', [fromUserId])
+    await tx.run('DELETE FROM email_tokens WHERE user_id = ?', [fromUserId])
+    await tx.run('DELETE FROM users WHERE id = ?', [fromUserId])
+  })
+
+  return move
+}

@@ -195,3 +195,44 @@ export function startLinkOAuth(
 export function unlinkMethod(token: string, method: SignInMethod): Promise<LinkState> {
   return del<LinkState>(`/link/${method}`, token)
 }
+
+/* ── Menggabungkan dua akun ──────────────────────────────────────────────── */
+
+export interface MergePreview {
+  bookings: number
+  merchOrders: number
+  complaints: number
+  registrations: number
+  teams: number
+  points: number
+}
+
+export interface MergeRequested {
+  phone: string
+  expiresAt: string
+  delivery: 'twilio' | 'log'
+  /** Isi akun yang akan diserap — ditunjukkan sebelum diputuskan. */
+  preview: MergePreview
+  devCode?: string
+}
+
+export interface MergeResult {
+  ok: true
+  user: AuthUser
+  identities: Identity[]
+  methods: SignInMethod[]
+  merged: {
+    moved: Record<string, number>
+    skipped: Record<string, number>
+    pointsAdded: number
+    contacts: { moved: string[]; released: string[] }
+  }
+}
+
+export function requestMergeOtp(token: string, phone: string): Promise<MergeRequested> {
+  return post<MergeRequested>('/merge/request-otp', { phone }, token)
+}
+
+export function confirmMerge(token: string, phone: string, code: string): Promise<MergeResult> {
+  return post<MergeResult>('/merge/confirm', { phone, code }, token)
+}
