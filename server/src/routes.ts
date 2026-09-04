@@ -45,6 +45,14 @@ import {
 } from './oauth.ts'
 import { sendEmail, sendSms } from './senders.ts'
 import { db, type UserRow } from './db.ts'
+import {
+  countSubscriptions,
+  publicKey,
+  pushConfigured,
+  removeSubscription,
+  saveSubscription,
+  sendPush,
+} from './push.ts'
 import { mergeDomainData, mergePreview } from './domain/store.ts'
 
 export const routes = Router()
@@ -800,6 +808,65 @@ routes.post('/merge/confirm', async (req, res) => {
     methods: await signInMethods(fresh),
     merged: { ...domain, contacts },
   })
+})
+
+/* ── Notifikasi push ─────────────────────────────────────────────────────── */
+
+/**
+ * Kunci publik VAPID, dibutuhkan peramban untuk berlangganan.
+ *
+ * Kunci privat tidak pernah meninggalkan server. Kalau belum dikonfigurasi,
+ * dijawab `available: false` — layar akan mengatakannya apa adanya alih-alih
+ * menampilkan tombol yang tidak akan pernah bekerja.
+ */
+routes.get('/push/key', (_req, res) => {
+  res.json({ available: pushConfigured(), publicKey: publicKey() })
+})
+
+const subscribeSchema = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({ p256dh: z.string().min(1), auth: z.string().min(1) }),
+})
+
+routes.post('/push/subscribe', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  if (!pushConfigured()) {
+    return fail(
+      res,
+      501,
+      'PUSH_NOT_CONFIGURED',
+      'Notifikasi push belum dikonfigurasi di server ini.',
+    )
+  }
+
+  const parsed = subscribeSchema.safeParse(req.body)
+  if (!parsed.success) return fail(res, 422, 'INVALID_BODY', 'Data langganan tidak lengkap.')
+
+  await saveSubscription(user.id, parsed.data, req.header('user-agent') ?? null)
+  res.json({ ok: true, devices: await countSubscriptions(user.id) })
+})
+
+routes.delete('/push/subscribe', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const endpoint = typeof req.query.endpoint === 'string' ? req.query.endpoint : null
+  if (!endpoint) return fail(res, 422, 'INVALID_BODY', 'Endpoint wajib disebut.')
+  await removeSubscription(endpoint)
+  res.json({ ok: true, devices: await countSubscriptions(user.id) })
+})
+
+/** Kiriman percobaan, supaya orang bisa membuktikan sendiri push-nya sampai. */
+routes.post('/push/test', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const result = await sendPush(user.id, {
+    title: 'Notifikasi DBTC aktif',
+    body: 'Kalau kamu melihat ini, push di perangkat ini sudah jalan.',
+    href: '/notifications',
+    tag: 'uji-push',
+  })
+  res.json(result)
 })
 
 /* ── Sesi ────────────────────────────────────────────────────────────────── */

@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/Button'
 import { Icon } from '@/components/ui/Icon'
 import { Toast } from '@/components/ui/Toast'
 import { Toggle, ToggleChip } from '@/components/ui/primitives'
+import { PushSetting } from '@/components/domain/PushSetting'
 
 const NOTIFY_LABEL: Record<NotificationKind, { title: string; body: string }> = {
   booking: { title: 'Booking', body: 'Pengingat main dan perubahan jadwal.' },
@@ -86,6 +87,8 @@ export function SettingsScreen() {
         <p className="text-base text-neutral-700">
           Jenis yang dimatikan tidak lagi muncul di daftar notifikasi.
         </p>
+
+        <PushSetting />
         <div className="flex flex-col gap-2">
           {(Object.keys(NOTIFY_LABEL) as NotificationKind[]).map((kind) => (
             <Toggle

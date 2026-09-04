@@ -36,6 +36,7 @@ import {
   VENUES,
 } from '../../../shared/seed.ts'
 import { tierFor } from '../../../shared/points.ts'
+import { sendPush } from '../push.ts'
 
 /**
  * Akses data domain.
@@ -959,6 +960,22 @@ export async function pushNotification(
      VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
     [row.id, userId, row.kind, row.title, row.body, row.href, row.createdAt],
   )
+
+  /*
+   * Push menyusul, dan kegagalannya tidak menjatuhkan apa pun. Notifikasi
+   * adalah efek samping: menggagalkan konfirmasi booking karena push-nya
+   * tidak terkirim adalah kerugian yang jauh lebih besar daripada notifikasi
+   * yang hilang. Daftar di dalam app tetap punya barisnya.
+   */
+  void sendPush(userId, {
+    title: row.title,
+    body: row.body,
+    href: row.href,
+    // Satu tag per jenis: sepuluh perubahan pada booking tidak jadi sepuluh
+    // notifikasi berturut-turut di layar kunci.
+    tag: row.kind,
+  }).catch((error) => console.warn('[push]', error))
+
   return row
 }
 

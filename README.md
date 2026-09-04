@@ -364,8 +364,8 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm run verify:all` menjalankan keduanya — **341 tes**: 230 frontend
-(22 berkas) dan 111 server (5 berkas).
+`npm run verify:all` menjalankan keduanya — **401 tes**: 230 frontend
+(22 berkas) dan 171 server (8 berkas).
 
 Tes server menembak app Express yang sama dengan yang dijalankan produksi,
 lewat HTTP sungguhan — jadi yang diuji bukan cuma logikanya tapi juga
@@ -580,31 +580,143 @@ darurat; jangan dilakukan tanpa sengaja.
 tampak persis sama dengan yang benar dari luar; ini yang membedakannya tanpa
 perlu membaca log start-up.
 
+## Pembayaran
+
+Menekan Bayar dulu langsung mengonfirmasi booking. Itu berarti app menyatakan
+lunas tanpa ada uang yang berpindah ke mana pun.
+
+Alurnya sekarang:
+
+```
+tagihan dibuat → penyedia menagih → webhook bertanda tangan → dikonfirmasi
+```
+
+Penyedianya **Midtrans Snap**, ditulis langsung tanpa SDK — yang paling sering
+salah bukan pemanggilannya melainkan verifikasi webhook, yang di SDK mana pun
+tetap harus ditulis sendiri.
+
+### Yang membuat uangnya tidak bisa dipalsukan
+
+| Aturan                                         | Kalau tidak                                                                |
+| ---------------------------------------------- | -------------------------------------------------------------------------- |
+| Jumlah dibaca dari catatan                     | Tagihan Rp100 untuk lapangan Rp200.000                                     |
+| Tanda tangan dibanding `timingSafeEqual`       | Selisih waktu membocorkannya karakter demi karakter                        |
+| Jumlah webhook dicocokkan                      | Tanda tangan sah atas angka salah tetap lolos                              |
+| Idempoten lewat `payment_events`               | Kiriman ulang penyedia mengkredit poin dua kali                            |
+| Yang lunas tidak berubah lagi                  | Webhook `expire` telat membatalkan yang sudah dibayar                      |
+| `capture` ≠ lunas tanpa `fraud_status: accept` | Lapangan terkunci untuk transaksi yang bisa dibatalkan                     |
+| Webhook dibaca sebagai teks mentah             | `JSON.parse` lalu `stringify` mengubah byte, tanda tangan tak pernah cocok |
+
+Slot baru dikunci **saat lunas**, bukan saat tagihan dibuat — kalau tidak,
+orang bisa memblokir lapangan tanpa membayar sepeser pun. Poin belanja juga
+menyusul pembayaran.
+
+### Tanpa kredensial: simulator yang mengatakan dirinya simulator
+
+Layarnya menyebutnya, dan QR-nya berisi penanda simulasi — bukan format QRIS
+yang tampak sah tapi tidak bisa dibayar. Jalurnya tetap jalur produksi: ia
+merakit webhook bertanda tangan lalu mengirimkannya ke endpoint yang sama,
+jadi verifikasi tanda tangan ikut terjalani setiap hari alih-alih jadi cabang
+yang baru pertama kali berjalan saat rilis.
+
+Di produksi, tidak adanya `MIDTRANS_*` adalah masalah **fatal** yang
+menghentikan start. App yang menerima pesanan dan mengaku lunas tanpa gerbang
+mengambil barang orang tanpa uang berpindah.
+
+## Iuran keanggotaan
+
+Tagihan per periode (`YYYY-MM`), unik lewat batasan `(user_id, period)` —
+dijaga basis data, bukan kehati-hatian pemanggil: dua permintaan yang datang
+bersamaan sama-sama lolos pemeriksaan dan sama-sama menulis.
+
+Orangnya jadi anggota berbayar **hanya setelah iurannya masuk**, lewat jalur
+pembayaran yang sama dengan booking dan toko.
+
+## Notifikasi push
+
+Web Push dengan service worker dan kunci VAPID. Sebelumnya push sengaja tidak
+dipalsukan; sekarang ia sungguhan, dan tetap jujur soal batasnya.
+
+Kunci VAPID **tidak** dibangkitkan otomatis saat start. Kunci publiknya
+tersimpan di setiap langganan peramban — membangkitkannya ulang tiap restart
+membuat seluruh langganan yang ada tidak bisa dipakai, tanpa satu pun tanda
+bahwa itu yang terjadi. Buat sekali:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Tiga keadaan dikatakan apa adanya, bukan disembunyikan di balik satu tombol
+yang kadang bekerja: peramban tidak mendukung, server belum dikonfigurasi, dan
+izin sudah ditolak permanen adalah tiga masalah berbeda dengan tiga jalan
+keluar berbeda. Izin diminta **saat tombolnya ditekan**, bukan saat app
+dibuka — peramban menghitung penolakan yang diminta tanpa konteks, dan sekali
+ditolak permanen tidak ada cara memintanya lagi dari dalam app.
+
+Langganan disimpan per **endpoint**, bukan per pasangan (user, endpoint): satu
+peramban punya satu endpoint, dan kalau perangkatnya berpindah tangan
+langganan itu ikut pemilik barunya. Yang dijawab 404/410 oleh layanan push
+dihapus — itu jawaban untuk perangkat yang sudah mencabut izin.
+
+**Yang belum terbukti:** pengiriman sungguhan. Itu menuntut layanan push
+peramban (FCM, Mozilla autopush) yang bisa dihubungi dari jaringan dan
+langganan dari peramban sungguhan. Yang diuji adalah semua yang ada di sisi
+kita: penyimpanan, penolakan saat belum dikonfigurasi, perpindahan pemilik
+perangkat, dan pembuangan langganan mati.
+
+## Tim & sparring
+
+Tim dibuat sendiri lewat **Lawan → Buat tim**; pembuatnya langsung jadi
+anggota pertama, karena tim tanpa anggota tidak bisa mengajak siapa pun.
+
+Ajakan sparring hanya bisa dikirim atas nama tim yang benar-benar diikuti —
+diperiksa di server, bukan cuma disaring di layar — dan hanya terlihat oleh
+pihak yang terlibat. Sebelumnya satu tim ditanam di kode untuk semua orang,
+jadi setiap ajakan mengaku datang dari tim yang sama dan setiap orang melihat
+tawar-menawar tim lain.
+
+Pembuat tidak bisa keluar dari timnya sendiri: tim tanpa pemilik tidak bisa
+diubah siapa pun lagi, sementara ajakan atas namanya tetap berjalan tanpa ada
+yang bertanggung jawab menjawabnya.
+
+## Menggabungkan dua akun
+
+Mendaftar lewat nomor lalu mendaftar lagi lewat email menghasilkan dua akun.
+Menyambungkan kontak tidak menolong — kontaknya sudah dipakai akun lain — jadi
+jalannya menggabung, lewat **Profil → Atur cara masuk → Punya dua akun?**
+
+Ini satu-satunya operasi di app yang **tidak bisa dibatalkan**, jadi:
+
+- Isi akun yang akan diserap ditunjukkan sebelum kodenya diminta diketik.
+- Syarat slot diperiksa **sebelum** kode dikirim.
+- Poin dijumlahkan, bukan diambil yang terbesar.
+- Baris yang bentrok pada batasan unik dibuang, bukan dipaksa masuk — satu
+  orang, satu kursi turnamen. Jumlah yang dibuang dilaporkan.
+- Kontak yang slotnya sudah terisi dilepas dan dilaporkan, bukan menimpa.
+
 ## Yang masih mock atau belum ada
 
 - **Venue selain klub** masih data contoh Bandung. Data klub sendiri diisi
   lewat dasbor admin — lihat bagian "Dasbor admin klub".
-- **Pembayaran.** Tidak ada gateway, untuk booking maupun toko. Menekan Bayar
-  langsung mengonfirmasi; QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode
-  bayar sungguhan.
-- **Iuran keanggotaan** hanya angka yang ditampilkan; belum ada penagihan
-  maupun status anggota yang kedaluwarsa.
+- **Iuran keanggotaan** ditagihkan dan dibayar, tapi belum ada penagihan
+  otomatis tiap bulan maupun status anggota yang kedaluwarsa sendiri —
+  tagihannya masih diterbitkan saat diminta.
 - **Foto venue dan barang toko.** Blok warna beraksen, bukan foto.
 - **SMS dan email sungguhan** menunggu Twilio dan SMTP; alurnya sudah lengkap,
   hanya salurannya yang masih log server.
-- **Notifikasi push** tidak ada, dan sengaja tidak dipalsukan: push sungguhan
-  butuh service worker dengan kunci VAPID dan server yang mengirim. Yang ada:
-  daftar notifikasi di dalam app, dengan preferensi per jenis yang berlaku,
-  plus SSE yang memperbarui layar yang sedang dibuka.
+- **Pengiriman push sungguhan** belum terbukti di sini — lihat bagian
+  "Notifikasi push". Jalurnya lengkap; yang belum dijalani adalah layanan push
+  peramban yang sesungguhnya.
 - **Pengiriman barang** tidak ada sama sekali — semua pesanan diambil di klub.
   Itu keputusan, bukan kekurangan; menambahkannya butuh alamat, kurir, dan
   pelacakan, yang tidak ada gunanya dipalsukan.
-- **Tim sendiri** masih satu tim tetap (`Garuda Muda FC`) sebagai pengirim
-  ajakan sparring; belum ada pembuatan tim oleh user.
-- **Menggabungkan dua akun** yang terlanjur terpisah belum ada. Menyambungkan
-  nomor atau email yang sudah dipakai akun lain ditolak dengan jelas, bukan
-  dipindahkan diam-diam — memutuskan booking dan poin siapa yang bertahan
-  bukan keputusan milik endpoint.
+- **Membubarkan tim** belum ada; pembuatnya juga belum bisa menyerahkan tim
+  ke anggota lain.
+- **Menggabungkan lewat email** belum ada; penggabungan sekarang selalu
+  diverifikasi lewat nomor HP.
+- **Pengembalian dana** tidak ada. Pembayaran yang sudah lunas tidak bisa
+  ditarik dari dalam app — itu menuntut alur refund penyedia dan keputusan
+  siapa yang berwenang menyetujuinya.
 
 ## Poin & riwayat main
 

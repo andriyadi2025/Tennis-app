@@ -88,6 +88,21 @@ export const config = {
     production: env('MIDTRANS_PRODUCTION') === 'true',
   },
 
+  /*
+   * Kunci VAPID untuk Web Push. Sengaja tidak dibangkitkan otomatis: kunci
+   * publiknya tersimpan di setiap langganan peramban, dan membangkitkannya
+   * ulang tiap restart membuat seluruh langganan jadi tidak bisa dipakai
+   * tanpa satu pun tanda bahwa itu yang terjadi.
+   *
+   * Buat sekali: `npx web-push generate-vapid-keys`
+   */
+  vapid: {
+    publicKey: env('VAPID_PUBLIC_KEY'),
+    privateKey: env('VAPID_PRIVATE_KEY'),
+    // Alamat kontak yang bisa dihubungi layanan push kalau ada masalah.
+    subject: env('VAPID_SUBJECT') ?? 'mailto:admin@dbtc.id',
+  },
+
   google: oauth('GOOGLE'),
   facebook: oauth('FACEBOOK'),
 
@@ -128,6 +143,7 @@ export function providerStatus() {
     facebook: config.facebook !== null,
     smsDelivery: smsConfigured() ? 'twilio' : 'log',
     payments: paymentsConfigured() ? 'midtrans' : 'simulator',
+    push: Boolean(config.vapid.publicKey && config.vapid.privateKey),
     emailDelivery: smtpConfigured() ? 'smtp' : 'log',
   } as const
 }
@@ -199,6 +215,12 @@ export function readiness(): ReadinessIssue[] {
   }
   if (!smtpConfigured()) {
     warn('SMTP_*', 'Email verifikasi dan atur ulang sandi dicetak ke log, bukan dikirim.')
+  }
+  if (!config.vapid.publicKey || !config.vapid.privateKey) {
+    warn(
+      'VAPID_*',
+      'Notifikasi push tidak tersedia. Buat kunci sekali dengan `npx web-push generate-vapid-keys`.',
+    )
   }
   if (!paymentsConfigured()) {
     /*

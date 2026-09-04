@@ -81,6 +81,19 @@ const TABLES = `
     expires_at    TEXT NOT NULL
   );
 
+  -- Langganan push per peramban. Endpoint jadi kuncinya: satu peramban punya
+  -- satu endpoint, dan kalau perangkatnya berpindah tangan langganan itu ikut
+  -- pemilik barunya, bukan tetap mengirim notifikasi orang sebelumnya.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint   TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    user_agent TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
   CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_codes(phone, consumed);
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_identities_user ON identities(user_id);
@@ -88,6 +101,7 @@ const TABLES = `
 
 /** Urutan penghapusan mengikuti ketergantungan; dipakai tes dan reset. */
 export const TABLE_NAMES = [
+  'push_subscriptions',
   'sessions',
   'otp_codes',
   'email_tokens',
