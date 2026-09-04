@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bell, ChevronRight, MapPin, Search, Swords, Trophy, Users } from 'lucide-react'
+import {
+  Bell,
+  ChevronRight,
+  MapPin,
+  Search,
+  ShoppingBag,
+  Swords,
+  Trophy,
+  Users,
+} from 'lucide-react'
 import type { Sport } from '@/types'
 import { SPORTS, SPORT_LABEL } from '@/types'
 import { useMe, useNotifications, useOpenMatches, useVenues } from '@/hooks/queries'
@@ -175,6 +184,21 @@ function VenueHome({ onPickSport }: { onPickSport: (sport: Sport) => void }) {
           </span>
         </Link>
       )}
+
+      {/* Toko tidak dapat tab sendiri (brief mematok empat), jadi pintu
+          masuknya di sini — tempat orang memang sedang menjelajah. */}
+      <Link to="/toko" className="flex items-center gap-4 rounded-lg bg-surface px-5 py-4">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-pill bg-accent-200 text-accent-800">
+          <Icon icon={ShoppingBag} size={19} />
+        </span>
+        <div className="flex flex-1 flex-col">
+          <span className="font-heading text-md">Toko DBTC</span>
+          <span className="text-sm text-neutral-700">
+            Jersey, grip, bola. Beli atau tukar dengan poin.
+          </span>
+        </div>
+        <Icon icon={ChevronRight} size={17} className="text-neutral-600" />
+      </Link>
 
       <div className="flex flex-col gap-3.5">
         <SectionHeading

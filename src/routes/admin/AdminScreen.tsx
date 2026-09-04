@@ -1,7 +1,22 @@
 import { Link } from 'react-router-dom'
-import { Building2, ChevronRight, Clock, LayoutGrid, Wallet } from 'lucide-react'
+import {
+  Building2,
+  ChevronRight,
+  Clock,
+  LayoutGrid,
+  LifeBuoy,
+  ShoppingBag,
+  Wallet,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useAdminCourts, useBookings, useClubSettings } from '@/hooks/queries'
+import {
+  useAdminCourts,
+  useAdminMerchOrders,
+  useBookings,
+  useClubSettings,
+  useComplaints,
+} from '@/hooks/queries'
+import { countAwaitingAdmin } from '@/lib/complaints'
 import { formatIdr } from '@/lib/money'
 import { Screen, ScreenHeader } from '@/components/layout/Screen'
 import { Icon } from '@/components/ui/Icon'
@@ -27,6 +42,18 @@ const SECTIONS: { to: string; label: string; body: string; icon: LucideIcon }[] 
     body: 'Nama, alamat, area, dan jam operasional.',
     icon: Building2,
   },
+  {
+    to: '/admin/toko',
+    label: 'Barang toko',
+    body: 'Katalog, harga rupiah dan poin, stok tiap varian.',
+    icon: ShoppingBag,
+  },
+  {
+    to: '/admin/aduan',
+    label: 'Aduan masuk',
+    body: 'Keluhan dan pesan anggota yang perlu dijawab.',
+    icon: LifeBuoy,
+  },
 ]
 
 /** Dasbor admin klub — pintu masuk ke seluruh pengaturan. */
@@ -34,11 +61,23 @@ export function AdminScreen() {
   const settings = useClubSettings()
   const courts = useAdminCourts()
   const bookings = useBookings()
+  const complaints = useComplaints()
+  const merchOrders = useAdminMerchOrders()
 
   const upcoming = (bookings.data ?? []).filter(
     (b) => new Date(b.range.endsAt).getTime() > Date.now() && b.status === 'confirmed',
   )
   const belumDiisi = settings.data?.address.trim().toLowerCase() === 'alamat belum diisi'
+
+  /*
+   * Lencana per bagian menyebut pekerjaan yang menunggu, bukan jumlah total.
+   * Angka total tidak memberi tahu apa pun soal apa yang harus dikerjakan
+   * hari ini; "3 perlu dijawab" memberi tahu.
+   */
+  const badges: Record<string, number> = {
+    '/admin/aduan': countAwaitingAdmin(complaints.data ?? []),
+    '/admin/toko': (merchOrders.data ?? []).filter((o) => o.status === 'menunggu').length,
+  }
 
   return (
     <Screen>
@@ -98,8 +137,18 @@ export function AdminScreen() {
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-pill bg-accent2-200 text-accent2-800">
               <Icon icon={icon} size={19} />
             </span>
-            <span className="flex flex-1 flex-col">
-              <span className="text-md font-bold">{label}</span>
+            {/* Lencana duduk sebaris dengan judulnya, bukan di samping seluruh
+                blok: ditaruh di samping, ia menggencet keterangan sampai
+                terpotong di tengah kata. */}
+            <span className="flex flex-1 flex-col gap-0.5">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-md font-bold">{label}</span>
+                {(badges[to] ?? 0) > 0 && (
+                  <Chip tone="accent">
+                    {badges[to]} {to === '/admin/aduan' ? 'perlu dijawab' : 'pesanan baru'}
+                  </Chip>
+                )}
+              </span>
               <span className="text-sm text-neutral-700">{body}</span>
             </span>
             <Icon icon={ChevronRight} size={17} className="text-neutral-600" />

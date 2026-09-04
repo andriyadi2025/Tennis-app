@@ -6,7 +6,10 @@ import {
   BadgeCheck,
   ChevronRight,
   CreditCard,
+  LifeBuoy,
+  Receipt,
   Settings,
+  ShoppingBag,
   ShieldCheck,
   Smartphone,
   Sparkles,
@@ -31,6 +34,9 @@ import { Avatar, Chip, ProgressBar } from '@/components/ui/primitives'
 import { ErrorState, SkeletonBlock } from '@/components/ui/states'
 
 const MENU: { to: string; label: string; icon: LucideIcon }[] = [
+  { to: '/toko', label: 'Toko DBTC', icon: ShoppingBag },
+  { to: '/toko/pesanan', label: 'Pesanan toko', icon: Receipt },
+  { to: '/bantuan', label: 'Bantuan & aduan', icon: LifeBuoy },
   { to: '/bookings', label: 'Metode pembayaran', icon: CreditCard },
   { to: '/match', label: 'Tim & komunitas', icon: Users },
   { to: '/sparring', label: 'Ajakan sparring', icon: Swords },

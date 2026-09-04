@@ -305,8 +305,8 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm run verify:all` menjalankan keduanya — **235 tes**: 192 frontend
-(20 berkas) dan 43 server (2 berkas).
+`npm run verify:all` menjalankan keduanya — **273 tes**: 230 frontend
+(22 berkas) dan 43 server (2 berkas).
 
 Tes server menembak app Express yang sama dengan yang dijalankan produksi,
 lewat HTTP sungguhan — jadi yang diuji bukan cuma logikanya tapi juga
@@ -434,6 +434,13 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Chat** mengirim pesan ke store tiruan; tidak ada realtime, karena itu juga
   butuh server (WebSocket atau SSE). Polling bisa saja dipasang, tapi itu meniru
   bentuknya tanpa memberi sifatnya.
+- **Pembayaran toko** memakai jalur tiruan yang sama dengan booking: metode
+  dicatat, tapi tidak ada gerbang pembayaran sungguhan di baliknya.
+- **Pengiriman barang** tidak ada sama sekali — semua pesanan diambil di klub.
+  Itu keputusan, bukan kekurangan; menambahkannya butuh alamat, kurir, dan
+  pelacakan, yang tidak ada gunanya dipalsukan.
+- **Notifikasi aduan** belum ada. Balasan klub baru terlihat kalau anggota
+  membuka layar Bantuan — push memerlukan server notifikasi.
 - **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
   usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
 
@@ -488,6 +495,81 @@ Angka "x main" di kartu profil ikut turunan ini (Bermain + Main bersama +
 Lomba; Berlatih tidak dihitung sebagai main). Sebelumnya itu angka mati yang
 tidak pernah berubah berapa kali pun user main.
 
+## Toko merchandise
+
+Barang klub bisa **dibeli dengan uang**, **ditukar dengan poin**, atau
+keduanya — admin yang menentukan per barang di **Dasbor klub → Barang toko**.
+
+| Barang tanpa…     | Artinya                       |
+| ----------------- | ----------------------------- |
+| harga rupiah      | hanya bisa ditukar poin       |
+| harga poin        | hanya bisa dibeli dengan uang |
+| dua-duanya terisi | pembeli memilih saat memesan  |
+
+Harga poin **tidak** diturunkan dari harga rupiah. Jersey Rp185.000 boleh
+ditebus 1.500 poin kalau klub mau memurahkannya; menurunkannya otomatis akan
+memaksa satu kurs untuk seluruh katalog.
+
+### Aturan yang menahan stok dan poin
+
+Semuanya di `src/lib/merch.ts`, dipanggil layar **dan** server. Ditulis dua
+kali, yang satu akan ketinggalan — dan yang ketinggalan biasanya yang di
+server.
+
+- **Stok tinggal di varian, bukan juga di barang.** Dua tempat menyimpan stok
+  akan menyimpang begitu satu varian terjual.
+- **Menebus poin tidak menghasilkan poin.** Kalau ia menghasilkan, tiap
+  penebusan mengembalikan sebagian ongkosnya dan saldo tidak pernah turun.
+  Membeli dengan uang tetap dapat poin belanja seperti biasa (1 per Rp1.000).
+- **Membatalkan mengembalikan stok _dan_ poin.** Poin belanja yang sempat
+  didapat ikut ditarik: tanpa itu, membeli lalu membatalkan jadi cara mencetak
+  poin tanpa membayar apa pun.
+- **Pesan penolakan menyebut angkanya** — "Stok M tinggal 4", bukan "stok
+  tidak cukup". Orang perlu tahu harus mengubah apa.
+- Maksimal 5 per pesanan, supaya satu orang tidak mengosongkan stok sekali
+  ketuk.
+
+Pesanan **diambil di klub**, tidak dikirim. Tidak ada alamat, kurir, atau
+pelacakan — memasangnya berarti meniru bentuk pengiriman tanpa memberi
+sifatnya. Anggota membatalkan sendiri selama status masih "Menunggu
+konfirmasi"; setelah itu sudah menyangkut kerja orang lain di klub.
+
+Alur status: Menunggu → Disiapkan → Siap diambil → Selesai. Yang sudah
+`Selesai` tidak bisa dibatalkan — barangnya sudah berpindah tangan, dan
+membatalkannya hanya akan membohongi stok.
+
+Toko sengaja **tidak** jadi tab kelima: brief mematok empat tab, jadi pintu
+masuknya lewat Home dan Profil.
+
+## Aduan & pesan ke admin
+
+**Profil → Bantuan & aduan**, atau tautan dari halaman pesanan toko. Anggota
+menulis, klub membalas, di **satu utas yang sama**. Bukan dua layar yang mirip:
+kalau tiap peran punya salinan sendiri, cepat atau lambat salah satunya
+menampilkan percakapan yang tidak lengkap.
+
+### Status mengikuti percakapan, bukan tombol
+
+`src/lib/complaints.ts` menggerakkan status dari siapa yang menulis terakhir:
+
+| Kejadian                          | Status jadi             |
+| --------------------------------- | ----------------------- |
+| Klub membalas aduan **Baru**      | Diproses                |
+| Anggota membalas yang **Selesai** | Diproses (terbuka lagi) |
+| Klub menekan "Tandai Selesai"     | Selesai                 |
+
+Kalau status hanya berubah saat admin menekan sesuatu, daftar akan penuh
+"Baru" yang sebenarnya sudah dijawab, dan "Selesai" yang sebenarnya masih
+dipersoalkan.
+
+Dasbor admin membuka di tab **"Perlu dijawab"**, bukan "Semua": yang dicari
+pengurus saat membuka layar itu adalah pekerjaan yang belum dikerjakan.
+Lencana di dasbor menghitung hal yang sama.
+
+Aduan bisa dikaitkan dengan booking atau pesanan toko. Opsional, tapi
+ditawarkan lebih dulu — aduan yang menyebut kode transaksi bisa
+ditindaklanjuti tanpa bertanya balik.
+
 ## Dasbor admin klub
 
 Data klub tidak lagi ditanam di kode. Admin mengisinya sendiri lewat **Profil →
@@ -501,6 +583,8 @@ Dasbor klub**, dan yang diisi langsung dipakai app:
 | Jam buka & tutup                 | Jam mana saja yang muncul di grid slot       |
 | Nama, alamat, area               | Kartu venue, detail venue, header Home       |
 | Iuran & potongan anggota         | Ditampilkan di tarif; belum menagih otomatis |
+| Barang toko, harga, stok varian  | Katalog toko dan apa yang bisa ditebus poin  |
+| Status pesanan toko              | Yang dilihat anggota di halaman pesanannya   |
 
 Aturan prime time dulu ditanam di `priceFor()` sebagai 18–21 ×1,2. Sekarang
 datang dari pengaturan, boleh melewati tengah malam (mis. 20–01), dan venue

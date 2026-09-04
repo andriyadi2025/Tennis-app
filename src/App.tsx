@@ -24,10 +24,19 @@ import { TeamScreen } from '@/routes/TeamScreen'
 import { ChatScreen } from '@/routes/ChatScreen'
 import { SparringScreen } from '@/routes/SparringScreen'
 import { SettingsScreen } from '@/routes/SettingsScreen'
+import { ShopScreen } from '@/routes/ShopScreen'
+import { ShopItemScreen } from '@/routes/ShopItemScreen'
+import { ShopOrdersScreen } from '@/routes/ShopOrdersScreen'
+import { HelpScreen } from '@/routes/HelpScreen'
+import { ComplaintNewScreen } from '@/routes/ComplaintNewScreen'
+import { ComplaintScreen } from '@/routes/ComplaintScreen'
 import { AdminScreen } from '@/routes/admin/AdminScreen'
 import { AdminCourtsScreen } from '@/routes/admin/AdminCourtsScreen'
 import { AdminPricingScreen } from '@/routes/admin/AdminPricingScreen'
 import { AdminClubScreen } from '@/routes/admin/AdminClubScreen'
+import { AdminMerchScreen } from '@/routes/admin/AdminMerchScreen'
+import { AdminMerchOrdersScreen } from '@/routes/admin/AdminMerchOrdersScreen'
+import { AdminComplaintsScreen } from '@/routes/admin/AdminComplaintsScreen'
 
 /** Rute tingkat atas — hanya di sini bottom nav muncul. */
 function TabLayout() {
@@ -100,12 +109,26 @@ export function App() {
           <Route path="/sparring" element={<SparringScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
 
+          {/* Toko klub. Sengaja tidak jadi tab kelima: brief mematok empat
+              tab, jadi pintu masuknya lewat Home dan Profil. */}
+          <Route path="/toko" element={<ShopScreen />} />
+          <Route path="/toko/pesanan" element={<ShopOrdersScreen />} />
+          <Route path="/toko/:id" element={<ShopItemScreen />} />
+
+          {/* Aduan & pesan ke admin. Utasnya dipakai bersama kedua peran. */}
+          <Route path="/bantuan" element={<HelpScreen />} />
+          <Route path="/bantuan/baru" element={<ComplaintNewScreen />} />
+          <Route path="/bantuan/:id" element={<ComplaintScreen />} />
+
           {/* Dasbor admin klub */}
           <Route element={<RequireAdmin />}>
             <Route path="/admin" element={<AdminScreen />} />
             <Route path="/admin/lapangan" element={<AdminCourtsScreen />} />
             <Route path="/admin/tarif" element={<AdminPricingScreen />} />
             <Route path="/admin/klub" element={<AdminClubScreen />} />
+            <Route path="/admin/toko" element={<AdminMerchScreen />} />
+            <Route path="/admin/toko/pesanan" element={<AdminMerchOrdersScreen />} />
+            <Route path="/admin/aduan" element={<AdminComplaintsScreen />} />
           </Route>
         </Route>
 
