@@ -227,6 +227,20 @@ export interface Team {
   losses: number
   photo: PhotoBlock
   about: string
+  /**
+   * Siapa yang membuat tim ini. `null` untuk tim bawaan yang sudah ada
+   * sebelum pembuatan tim oleh user — bukan berarti tanpa pemilik, melainkan
+   * pemiliknya bukan salah satu akun di sini.
+   */
+  ownerId: string | null
+}
+
+/** Tim seperti yang diisi user — belum punya id sampai disimpan. */
+export interface TeamDraft {
+  name: string
+  sport: Sport
+  city: string
+  about: string
 }
 
 export type TournamentStatus = 'pendaftaran' | 'berlangsung' | 'selesai'

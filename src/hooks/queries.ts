@@ -27,6 +27,7 @@ import type {
   Sport,
   SparringInvite,
   Team,
+  TeamDraft,
   Tournament,
   TournamentRegistration,
   User,
@@ -376,12 +377,21 @@ export function useJoinTeam(id: string | undefined) {
   })
 }
 
+export interface SparRequest {
+  message?: string
+  /** Tim pengirim; wajib milik user sendiri — server memeriksanya lagi. */
+  fromTeamId?: string
+  proposedAt?: string | null
+  venueName?: string | null
+}
+
 export function useRequestSparring(id: string | undefined) {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (message?: string) => apiPost<SparringInvite>(`/api/teams/${id}/spar`, { message }),
+    mutationFn: (input: SparRequest) => apiPost<SparringInvite>(`/api/teams/${id}/spar`, input),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.notifications })
+      void client.invalidateQueries({ queryKey: queryKeys.sparring })
     },
   })
 }
@@ -716,6 +726,45 @@ export function useProposeSparring(id: string | undefined) {
     onSuccess: ({ proposals }) => {
       client.setQueryData(queryKeys.proposals(id ?? ''), proposals)
       void client.invalidateQueries({ queryKey: queryKeys.sparring })
+    },
+  })
+}
+
+/* ── Tim buatan user ───────────────────────────────────────────────────── */
+
+export function useCreateTeam() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (draft: TeamDraft) => apiPost<Team>('/api/teams', draft),
+    onSuccess: (team) => {
+      client.setQueryData(queryKeys.team(team.id), team)
+      void client.invalidateQueries({ queryKey: queryKeys.teams })
+      // Keanggotaan berubah, dan itu yang menentukan tim mana yang boleh
+      // dipakai mengirim ajakan sparring.
+      void client.invalidateQueries({ queryKey: queryKeys.memberships })
+    },
+  })
+}
+
+export function useUpdateTeam(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (draft: TeamDraft) => apiPatch<Team>(`/api/teams/${id}`, draft),
+    onSuccess: (team) => {
+      client.setQueryData(queryKeys.team(team.id), team)
+      void client.invalidateQueries({ queryKey: queryKeys.teams })
+    },
+  })
+}
+
+export function useLeaveTeam(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost<Team>(`/api/teams/${id}/leave`, {}),
+    onSuccess: (team) => {
+      client.setQueryData(queryKeys.team(team.id), team)
+      void client.invalidateQueries({ queryKey: queryKeys.teams })
+      void client.invalidateQueries({ queryKey: queryKeys.memberships })
     },
   })
 }

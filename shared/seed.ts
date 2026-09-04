@@ -470,6 +470,8 @@ export const TEAMS: Team[] = [
     losses: 9,
     photo: { tone: 'accent2', step: 400, seed: 7 },
     about: 'Tim futsal tarkam Bandung Selatan. Latihan rutin Selasa & Kamis malam.',
+    // Tim bawaan: pemiliknya bukan salah satu akun di app ini.
+    ownerId: null,
   },
   {
     id: 't-smash',
@@ -486,6 +488,8 @@ export const TEAMS: Team[] = [
     losses: 17,
     photo: { tone: 'accent', step: 300, seed: 18 },
     about: 'Komunitas badminton terbuka. Open match tiap Jumat di GOR Cendana.',
+    // Tim bawaan: pemiliknya bukan salah satu akun di app ini.
+    ownerId: null,
   },
   {
     id: 't-hoops',
@@ -501,6 +505,8 @@ export const TEAMS: Team[] = [
     losses: 12,
     photo: { tone: 'neutral', step: 300, seed: 29 },
     about: 'Basket 3x3 dan 5x5. Terbuka buat semua level, yang penting konsisten datang.',
+    // Tim bawaan: pemiliknya bukan salah satu akun di app ini.
+    ownerId: null,
   },
 ]
 

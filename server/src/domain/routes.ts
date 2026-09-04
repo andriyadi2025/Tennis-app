@@ -58,9 +58,6 @@ export const domainRoutes = Router()
 /** Hold pembayaran 10 menit. */
 export const PAYMENT_HOLD_MS = 10 * 60 * 1_000
 
-/** Tim yang dianggap milik user; pengirim tiap ajakan sparring keluar. */
-const MY_TEAM = { id: 't-garuda', name: 'Garuda Muda FC' }
-
 export const ADD_ONS = [
   { id: 'a-shuttlecock', label: 'Shuttlecock (1 tube)', priceIdr: 95_000 },
   { id: 'a-raket', label: 'Sewa raket', priceIdr: 25_000 },
@@ -494,6 +491,65 @@ domainRoutes.get('/teams/:id', async (req, res) => {
   res.json(team)
 })
 
+const teamSchema = z.object({
+  name: z.string().trim().min(2).max(60),
+  sport: z.string().min(1),
+  city: z.string().trim().min(2).max(60),
+  about: z.string().trim().max(400).default(''),
+})
+
+domainRoutes.post('/teams', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const parsed = teamSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return fail(res, 422, 'INVALID_BODY', 'Nama tim dan kota wajib diisi, minimal 2 karakter.')
+  }
+  const team = await store.createTeam({ ...parsed.data, sport: parsed.data.sport as Sport }, user)
+  res.status(201).json(team)
+})
+
+domainRoutes.patch('/teams/:id', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const team = await store.findTeam(req.params.id)
+  if (!team) return fail(res, 404, 'NOT_FOUND', 'Tim tidak ditemukan.')
+  /*
+   * Hanya pembuatnya. Tim bawaan tidak punya pemilik akun di sini, jadi
+   * tidak ada yang bisa mengubahnya — itu memang benar: yang punya bukan
+   * salah satu pengguna app ini.
+   */
+  if (team.ownerId !== user.id) {
+    return fail(res, 403, 'NOT_OWNER', 'Hanya pembuat tim yang bisa mengubahnya.')
+  }
+
+  const parsed = teamSchema.safeParse(req.body)
+  if (!parsed.success) return fail(res, 422, 'INVALID_BODY', 'Data tim tidak lengkap.')
+  res.json(await store.updateTeam(team.id, { ...parsed.data, sport: parsed.data.sport as Sport }))
+})
+
+domainRoutes.post('/teams/:id/leave', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const team = await store.findTeam(req.params.id)
+  if (!team) return fail(res, 404, 'NOT_FOUND', 'Tim tidak ditemukan.')
+  /*
+   * Pembuat tidak bisa keluar dari timnya sendiri. Tim tanpa pemilik tidak
+   * bisa diubah siapa pun lagi, dan ajakan sparring atas namanya tetap
+   * berjalan tanpa ada yang bertanggung jawab menjawabnya.
+   */
+  if (team.ownerId === user.id) {
+    return fail(
+      res,
+      409,
+      'OWNER_CANNOT_LEAVE',
+      'Kamu pembuat tim ini. Serahkan dulu ke anggota lain, atau bubarkan timnya.',
+    )
+  }
+  await store.leaveTeam(team.id, user.id)
+  res.json(await store.findTeam(team.id))
+})
+
 domainRoutes.post('/teams/:id/join', async (req, res) => {
   const user = await requireUser(req, res)
   if (!user) return
@@ -634,7 +690,7 @@ domainRoutes.get('/chats/:id/stream', async (req, res) => {
 domainRoutes.get('/sparring', async (req, res) => {
   const user = await requireUser(req, res)
   if (!user) return
-  res.json(await store.listSparring(MY_TEAM.id))
+  res.json(await store.listSparring(await store.myTeamIds(user.id)))
 })
 
 domainRoutes.post('/teams/:id/spar', async (req, res) => {
@@ -643,17 +699,42 @@ domainRoutes.post('/teams/:id/spar', async (req, res) => {
   const team = await store.findTeam(req.params.id)
   if (!team) return fail(res, 404, 'NOT_FOUND', 'Tim tidak ditemukan.')
 
-  const { message, proposedAt, venueName } = req.body as {
+  const { message, proposedAt, venueName, fromTeamId } = req.body as {
     message?: string
     proposedAt?: string | null
     venueName?: string | null
+    fromTeamId?: string
   }
+
+  /*
+   * Tim pengirim harus tim yang benar-benar diikuti user. Dulu satu tim
+   * ditanam di kode untuk semua orang, jadi setiap ajakan mengaku datang dari
+   * tim yang sama — termasuk dari orang yang bukan anggotanya.
+   */
+  const mine = await store.myTeamIds(user.id)
+  if (mine.size === 0) {
+    return fail(
+      res,
+      409,
+      'NO_TEAM',
+      'Kamu belum punya tim. Buat tim dulu sebelum mengajak sparring.',
+    )
+  }
+  const senderId = fromTeamId ?? [...mine][0]!
+  if (!mine.has(senderId)) {
+    return fail(res, 403, 'NOT_MEMBER', 'Kamu bukan anggota tim yang dipakai mengirim ajakan.')
+  }
+  if (senderId === team.id) {
+    return fail(res, 409, 'SAME_TEAM', 'Tim tidak bisa mengajak sparring dirinya sendiri.')
+  }
+  const sender = await store.findTeam(senderId)
+  if (!sender) return fail(res, 404, 'NOT_FOUND', 'Tim pengirim tidak ditemukan.')
 
   const invite = {
     id: store.uid('sp'),
     direction: 'keluar' as const,
-    fromTeamId: MY_TEAM.id,
-    fromTeamName: MY_TEAM.name,
+    fromTeamId: sender.id,
+    fromTeamName: sender.name,
     toTeamId: team.id,
     toTeamName: team.name,
     sport: team.sport,
@@ -670,7 +751,7 @@ domainRoutes.post('/teams/:id/spar', async (req, res) => {
       id: store.uid('spp'),
       sparringId: invite.id,
       bySide: 'tuan',
-      byName: MY_TEAM.name,
+      byName: sender.name,
       proposedAt: invite.proposedAt,
       venueName: invite.venueName,
       note: invite.message,
@@ -685,13 +766,13 @@ domainRoutes.post('/teams/:id/spar', async (req, res) => {
     body: `Menunggu jawaban ${team.name}.`,
     href: '/sparring',
   })
-  res.status(201).json(await store.findSparring(invite.id, MY_TEAM.id))
+  res.status(201).json(await store.findSparring(invite.id, await store.myTeamIds(user.id)))
 })
 
 domainRoutes.post('/sparring/:id/respond', async (req, res) => {
   const user = await requireUser(req, res)
   if (!user) return
-  const invite = await store.findSparring(req.params.id, MY_TEAM.id)
+  const invite = await store.findSparring(req.params.id, await store.myTeamIds(user.id))
   if (!invite) return fail(res, 404, 'NOT_FOUND', 'Ajakan tidak ditemukan.')
 
   const { accept } = req.body as { accept: boolean }
@@ -712,7 +793,7 @@ domainRoutes.post('/sparring/:id/respond', async (req, res) => {
   await store.setSparringStatus(invite.id, accept ? 'diterima' : 'ditolak')
   if (accept) await store.acceptLatestProposal(invite.id)
   publish('sparring', invite.id, 'status', { accepted: Boolean(accept) }, user.id)
-  res.json(await store.findSparring(invite.id, MY_TEAM.id))
+  res.json(await store.findSparring(invite.id, await store.myTeamIds(user.id)))
 })
 
 const proposalSchema = z.object({
@@ -732,7 +813,7 @@ domainRoutes.post('/sparring/:id/propose', async (req, res) => {
   const user = await requireUser(req, res)
   if (!user) return
 
-  const invite = await store.findSparring(req.params.id, MY_TEAM.id)
+  const invite = await store.findSparring(req.params.id, await store.myTeamIds(user.id))
   if (!invite) return fail(res, 404, 'NOT_FOUND', 'Ajakan tidak ditemukan.')
   if (invite.status === 'ditolak') {
     return fail(res, 409, 'ALREADY_DECLINED', 'Ajakan ini sudah ditolak.')
@@ -780,7 +861,7 @@ domainRoutes.post('/sparring/:id/propose', async (req, res) => {
 
   publish('sparring', invite.id, 'proposal', { id: proposal.id }, user.id)
   res.status(201).json({
-    invite: await store.findSparring(invite.id, MY_TEAM.id),
+    invite: await store.findSparring(invite.id, await store.myTeamIds(user.id)),
     proposals: await store.listProposals(invite.id),
   })
 })
@@ -812,7 +893,7 @@ async function activityFeed(user: DomainUser, profile: User) {
     openMatches: await store.listOpenMatches(),
     tournaments: await store.listTournaments(),
     registrations: await store.listRegistrations(user.id),
-    sparring: await store.listSparring(MY_TEAM.id),
+    sparring: await store.listSparring(await store.myTeamIds(user.id)),
     userId: user.id,
     points: settings.activityPoints,
   })

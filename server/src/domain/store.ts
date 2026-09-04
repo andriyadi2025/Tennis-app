@@ -16,6 +16,7 @@ import type {
   Review,
   SparringInvite,
   Team,
+  TeamDraft,
   Tournament,
   TournamentRegistration,
   User,
@@ -119,10 +120,11 @@ export async function seedDomain(sql: Sql = db): Promise<void> {
     }
 
     for (const team of TEAMS) {
-      await tx.run('INSERT INTO teams (id, sport, data) VALUES (?, ?, ?)', [
+      // Tim bawaan tidak punya pemilik akun di sini.
+      await tx.run('INSERT INTO teams (id, sport, owner_id, data) VALUES (?, ?, NULL, ?)', [
         team.id,
         team.sport,
-        pack({ ...team, members: [] }),
+        pack({ ...team, members: [], ownerId: null }),
       ])
       for (const member of team.members) {
         await tx.run(
@@ -622,7 +624,9 @@ export async function leaveMatch(matchId: string, userId: string, sql: Sql = db)
 /* ── Tim ─────────────────────────────────────────────────────────────────── */
 
 export async function listTeams(sql: Sql = db): Promise<Team[]> {
-  const rows = await sql.all<{ id: string; data: string }>('SELECT id, data FROM teams')
+  const rows = await sql.all<{ id: string; data: string; owner_id: string | null }>(
+    'SELECT id, data, owner_id FROM teams',
+  )
   const out: Team[] = []
   for (const row of rows) {
     const members = await sql.all<{ user_id: string; name: string; level: string }>(
@@ -632,6 +636,7 @@ export async function listTeams(sql: Sql = db): Promise<Team[]> {
     const team = unpack<Team>(row.data)
     out.push({
       ...team,
+      ownerId: row.owner_id,
       members: members.map((m) => ({ id: m.user_id, name: m.name, level: m.level as 'pemula' })),
       memberCount: members.length,
     })
@@ -649,6 +654,82 @@ export async function joinTeam(teamId: string, user: DomainUser, sql: Sql = db):
      ON CONFLICT (team_id, user_id) DO NOTHING`,
     [teamId, user.id, user.name],
   )
+}
+
+/**
+ * Membuat tim, lalu langsung memasukkan pembuatnya sebagai anggota.
+ *
+ * Tim tanpa satu pun anggota tidak bisa mengajak siapa pun sparring, dan
+ * membiarkan pembuatnya di luar berarti langkah pertama setiap orang adalah
+ * bergabung ke tim yang baru saja ia buat sendiri.
+ */
+export async function createTeam(
+  draft: TeamDraft,
+  owner: DomainUser,
+  sql: Sql = db,
+): Promise<Team> {
+  const id = uid('t')
+  const seed = id.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0)
+  const tones = ['accent', 'accent2', 'neutral'] as const
+  const team: Team = {
+    id,
+    name: draft.name.trim(),
+    sport: draft.sport,
+    city: draft.city.trim(),
+    memberCount: 1,
+    members: [],
+    wins: 0,
+    losses: 0,
+    photo: { tone: tones[seed % 3] ?? 'accent', step: 300, seed },
+    about: draft.about.trim(),
+    ownerId: owner.id,
+  }
+
+  await sql.transaction(async (tx) => {
+    await tx.run('INSERT INTO teams (id, sport, owner_id, data) VALUES (?, ?, ?, ?)', [
+      id,
+      team.sport,
+      owner.id,
+      pack({ ...team, members: [] }),
+    ])
+    await tx.run(
+      "INSERT INTO team_members (team_id, user_id, name, level) VALUES (?, ?, ?, 'menengah')",
+      [id, owner.id, owner.name],
+    )
+  })
+
+  return (await findTeam(id, sql))!
+}
+
+export async function updateTeam(
+  id: string,
+  draft: TeamDraft,
+  sql: Sql = db,
+): Promise<Team | undefined> {
+  const existing = await findTeam(id, sql)
+  if (!existing) return undefined
+  const next: Team = {
+    ...existing,
+    name: draft.name.trim(),
+    sport: draft.sport,
+    city: draft.city.trim(),
+    about: draft.about.trim(),
+  }
+  await sql.run('UPDATE teams SET sport = ?, data = ? WHERE id = ?', [
+    next.sport,
+    pack({ ...next, members: [] }),
+    id,
+  ])
+  return findTeam(id, sql)
+}
+
+export async function leaveTeam(teamId: string, userId: string, sql: Sql = db): Promise<void> {
+  await sql.run('DELETE FROM team_members WHERE team_id = ? AND user_id = ?', [teamId, userId])
+}
+
+/** Id tim yang diikuti user — dasar semua tampilan sparring. */
+export async function myTeamIds(userId: string, sql: Sql = db): Promise<Set<string>> {
+  return new Set(await teamsJoinedBy(userId, sql))
 }
 
 export async function teamsJoinedBy(userId: string, sql: Sql = db): Promise<string[]> {
@@ -897,9 +978,16 @@ interface SparringRow {
   created_at: string
 }
 
-const toSparring = (r: SparringRow, myTeamId: string): SparringInvite => ({
+/**
+ * Arah ajakan dilihat dari tim-tim yang benar-benar diikuti user.
+ *
+ * Dulu dibandingkan dengan satu id tim yang ditanam di kode, jadi setiap
+ * ajakan yang tidak menuju tim itu tampak sebagai "keluar" — termasuk yang
+ * bukan urusan user sama sekali.
+ */
+const toSparring = (r: SparringRow, myTeamIds: ReadonlySet<string>): SparringInvite => ({
   id: r.id,
-  direction: r.to_team_id === myTeamId ? 'masuk' : 'keluar',
+  direction: myTeamIds.has(r.to_team_id) ? 'masuk' : 'keluar',
   fromTeamId: r.from_team_id,
   fromTeamName: r.from_team_name,
   toTeamId: r.to_team_id,
@@ -912,14 +1000,28 @@ const toSparring = (r: SparringRow, myTeamId: string): SparringInvite => ({
   createdAt: r.created_at,
 })
 
-export async function listSparring(myTeamId: string, sql: Sql = db): Promise<SparringInvite[]> {
+/**
+ * Ajakan yang melibatkan salah satu tim user — bukan seluruh ajakan yang ada.
+ * Sebelumnya semua baris dikembalikan apa adanya, jadi tiap orang melihat
+ * tawar-menawar tim lain.
+ */
+export async function listSparring(
+  myTeamIds: ReadonlySet<string>,
+  sql: Sql = db,
+): Promise<SparringInvite[]> {
+  if (myTeamIds.size === 0) return []
   const rows = await sql.all<SparringRow>('SELECT * FROM sparring ORDER BY created_at DESC')
-  return rows.map((r) => toSparring(r, myTeamId))
+  return rows
+    .filter((r) => myTeamIds.has(r.from_team_id) || myTeamIds.has(r.to_team_id))
+    .map((r) => toSparring(r, myTeamIds))
 }
 
-export async function findSparring(id: string, myTeamId: string, sql: Sql = db) {
+export async function findSparring(id: string, myTeamIds: ReadonlySet<string>, sql: Sql = db) {
   const row = await sql.get<SparringRow>('SELECT * FROM sparring WHERE id = ?', [id])
-  return row ? toSparring(row, myTeamId) : undefined
+  if (!row) return undefined
+  // Ajakan yang tidak melibatkan tim user bukan miliknya untuk dibaca.
+  if (!myTeamIds.has(row.from_team_id) && !myTeamIds.has(row.to_team_id)) return undefined
+  return toSparring(row, myTeamIds)
 }
 
 export async function saveSparring(invite: SparringInvite, sql: Sql = db): Promise<void> {

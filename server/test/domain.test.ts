@@ -433,7 +433,13 @@ describe('open match', () => {
 })
 
 describe('negosiasi waktu sparring', () => {
+  /**
+   * Ajakan sparring kini hanya terlihat oleh anggota timnya, jadi tesnya
+   * harus bergabung dulu. Sebelumnya semua ajakan terlihat siapa pun —
+   * itu yang diperbaiki, bukan yang perlu dipertahankan.
+   */
   async function anInvite(token: string) {
+    await post('/api/teams/t-garuda/join', {}, token)
     const rows = await get('/api/sparring', token)
     const masuk = rows.list.find((r) => r.direction === 'masuk')
     return masuk as unknown as { id: string; proposedAt: string | null }
@@ -508,6 +514,7 @@ describe('negosiasi waktu sparring', () => {
 
   it('menolak menerima ajakan yang belum punya usulan waktu', async () => {
     const token = await signIn(RAKA, 'Raka')
+    await post('/api/teams/t-garuda/join', {}, token)
     const rows = await get('/api/sparring', token)
     const tanpaWaktu = rows.list.find((r) => r.direction === 'masuk' && r.proposedAt === null)
     if (!tanpaWaktu) return // seed tidak selalu punya kasus ini
@@ -595,5 +602,135 @@ describe('realtime', () => {
   it('menolak aliran tanpa token', async () => {
     const response = await fetch(`${base}/api/chats/chat-om-1/stream`)
     expect(response.status).toBe(401)
+  })
+})
+
+describe('tim buatan user', () => {
+  const draft = {
+    name: 'Dukuh Bima Muda',
+    sport: 'tennis',
+    city: 'Bandung',
+    about: 'Latihan Selasa & Jumat.',
+  }
+
+  it('memasukkan pembuatnya jadi anggota pertama', async () => {
+    const token = await signIn(RAKA, 'Raka')
+    const created = await post('/api/teams', draft, token)
+
+    expect(created.status).toBe(201)
+    // Tim tanpa anggota tidak bisa mengajak siapa pun sparring.
+    expect((created.body.members as unknown[]).length).toBe(1)
+    expect(created.body.memberCount).toBe(1)
+
+    const mine = await get('/api/memberships', token)
+    expect(mine.body.teams).toContain(created.body.id)
+  })
+
+  it('hanya pembuatnya yang bisa mengubah', async () => {
+    const raka = await signIn(RAKA, 'Raka')
+    const dimas = await signIn(DIMAS, 'Dimas')
+    const created = await post('/api/teams', draft, raka)
+
+    const asing = await patch(`/api/teams/${created.body.id}`, { ...draft, name: 'Dibajak' }, dimas)
+    expect(asing.status).toBe(403)
+
+    const sendiri = await patch(
+      `/api/teams/${created.body.id}`,
+      { ...draft, name: 'Nama Baru' },
+      raka,
+    )
+    expect(sendiri.body.name).toBe('Nama Baru')
+  })
+
+  it('tidak membiarkan tim bawaan diubah — pemiliknya bukan akun di sini', async () => {
+    const token = await signIn(RAKA, 'Raka')
+    const teams = await get('/api/teams', token)
+    const bawaan = teams.list.find((t) => t.ownerId === null)!
+    expect((await patch(`/api/teams/${bawaan.id}`, draft, token)).status).toBe(403)
+  })
+
+  it('menolak pembuat keluar dari timnya sendiri', async () => {
+    const token = await signIn(RAKA, 'Raka')
+    const created = await post('/api/teams', draft, token)
+
+    const keluar = await post(`/api/teams/${created.body.id}/leave`, {}, token)
+    // Tim tanpa pemilik tidak bisa diubah siapa pun lagi, tapi ajakan atas
+    // namanya tetap berjalan tanpa ada yang menjawab.
+    expect(keluar.status).toBe(409)
+    expect(keluar.body.code).toBe('OWNER_CANNOT_LEAVE')
+  })
+
+  it('membolehkan anggota biasa keluar', async () => {
+    const raka = await signIn(RAKA, 'Raka')
+    const dimas = await signIn(DIMAS, 'Dimas')
+    const created = await post('/api/teams', draft, raka)
+
+    await post(`/api/teams/${created.body.id}/join`, {}, dimas)
+    expect((await get('/api/memberships', dimas)).body.teams).toContain(created.body.id)
+
+    const keluar = await post(`/api/teams/${created.body.id}/leave`, {}, dimas)
+    expect(keluar.status).toBe(200)
+    expect((await get('/api/memberships', dimas)).body.teams).not.toContain(created.body.id)
+  })
+})
+
+describe('sparring memakai tim sungguhan', () => {
+  const draft = { name: 'Dukuh Bima Muda', sport: 'tennis', city: 'Bandung', about: '' }
+
+  it('menolak mengajak sparring kalau belum punya tim', async () => {
+    const token = await signIn(RAKA, 'Raka')
+    const teams = await get('/api/teams', token)
+    const lawan = teams.list[0]!
+
+    const ditolak = await post(`/api/teams/${lawan.id}/spar`, { message: 'Halo' }, token)
+    expect(ditolak.status).toBe(409)
+    expect(ditolak.body.code).toBe('NO_TEAM')
+  })
+
+  it('menolak mengirim atas nama tim yang bukan miliknya', async () => {
+    const raka = await signIn(RAKA, 'Raka')
+    const dimas = await signIn(DIMAS, 'Dimas')
+    const punyaRaka = await post('/api/teams', draft, raka)
+    await post('/api/teams', { ...draft, name: 'Tim Dimas' }, dimas)
+
+    const teams = await get('/api/teams', dimas)
+    const lawan = teams.list.find((t) => t.ownerId === null)!
+
+    const menyamar = await post(
+      `/api/teams/${lawan.id}/spar`,
+      { fromTeamId: punyaRaka.body.id, message: 'Halo' },
+      dimas,
+    )
+    expect(menyamar.status).toBe(403)
+    expect(menyamar.body.code).toBe('NOT_MEMBER')
+  })
+
+  it('menolak tim mengajak dirinya sendiri', async () => {
+    const token = await signIn(RAKA, 'Raka')
+    const punya = await post('/api/teams', draft, token)
+    const sendiri = await post(
+      `/api/teams/${punya.body.id}/spar`,
+      { fromTeamId: punya.body.id },
+      token,
+    )
+    expect(sendiri.status).toBe(409)
+    expect(sendiri.body.code).toBe('SAME_TEAM')
+  })
+
+  it('hanya menampilkan ajakan yang melibatkan tim sendiri', async () => {
+    const raka = await signIn(RAKA, 'Raka')
+    const dimas = await signIn(DIMAS, 'Dimas')
+
+    // Raka belum punya tim: tidak ada ajakan yang jadi urusannya.
+    expect((await get('/api/sparring', raka)).list).toHaveLength(0)
+
+    const punyaRaka = await post('/api/teams', draft, raka)
+    const teams = await get('/api/teams', raka)
+    const lawan = teams.list.find((t) => t.ownerId === null)!
+    await post(`/api/teams/${lawan.id}/spar`, { fromTeamId: punyaRaka.body.id }, raka)
+
+    expect((await get('/api/sparring', raka)).list).toHaveLength(1)
+    // Dan tawar-menawar tim lain bukan urusan Dimas.
+    expect((await get('/api/sparring', dimas)).list).toHaveLength(0)
   })
 })

@@ -109,7 +109,12 @@ export function MatchScreen() {
 
       {/* 16 · Tim & komunitas — daftar; detailnya di /team/:id */}
       <section className="flex flex-col gap-3.5">
-        <h2 className="text-3xl">Tim & komunitas</h2>
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-3xl">Tim &amp; komunitas</h2>
+          <Link to="/tim/baru" className="text-base font-semibold text-accent-700">
+            Buat tim
+          </Link>
+        </div>
         <AsyncList
           isLoading={teams.isLoading}
           error={teams.error}

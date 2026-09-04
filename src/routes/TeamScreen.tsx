@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CalendarPlus, ChevronRight, MapPin, Send, Swords } from 'lucide-react'
 import type { Sport } from '@/types'
@@ -33,6 +34,18 @@ export function TeamScreen() {
   const memberships = useMemberships()
   const { toast, show } = useToast()
   const joined = (memberships.data?.teams ?? []).includes(id ?? '')
+
+  /*
+   * Tim pengirim ajakan. Dulu satu tim ditanam di kode untuk semua orang,
+   * jadi setiap ajakan mengaku datang dari tim yang sama — termasuk dari
+   * orang yang bukan anggotanya. Sekarang hanya tim yang benar-benar diikuti
+   * yang bisa jadi pengirim, dan server memeriksanya lagi.
+   */
+  const myTeams = (others.data ?? []).filter(
+    (t) => (memberships.data?.teams ?? []).includes(t.id) && t.id !== id,
+  )
+  const [senderId, setSenderId] = useState('')
+  const sender = myTeams.find((t) => t.id === senderId) ?? myTeams[0]
 
   if (team.isLoading) {
     return (
@@ -82,15 +95,39 @@ export function TeamScreen() {
         </dl>
       </section>
 
+      {/* Pilihan pengirim baru muncul kalau memang ada yang perlu dipilih. */}
+      {myTeams.length > 1 && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-neutral-700">Kirim ajakan atas nama</span>
+          <select
+            value={sender?.id ?? ''}
+            onChange={(e) => setSenderId(e.target.value)}
+            className="min-h-touch rounded-pill bg-surface px-5 text-lg text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {myTeams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <div className="flex gap-3">
         <Button
           block
-          disabled={spar.isPending}
+          disabled={spar.isPending || !sender}
+          title={sender ? undefined : 'Kamu belum punya tim untuk mengirim ajakan.'}
           onClick={() =>
-            spar.mutate(undefined, {
-              onSuccess: () => show('Ajakan terkirim. Lihat statusnya di Ajakan sparring.'),
-              onError: (error) => show(error.message, 'gagal'),
-            })
+            sender &&
+            spar.mutate(
+              { fromTeamId: sender.id },
+              {
+                onSuccess: () =>
+                  show(`Ajakan dari ${sender.name} terkirim. Lihat statusnya di Ajakan sparring.`),
+                onError: (error) => show(error.message, 'gagal'),
+              },
+            )
           }
         >
           <Icon icon={Swords} size={16} />

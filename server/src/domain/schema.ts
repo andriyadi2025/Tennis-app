@@ -114,9 +114,11 @@ const TABLES = `
   );
 
   CREATE TABLE IF NOT EXISTS teams (
-    id    TEXT PRIMARY KEY,
-    sport TEXT NOT NULL,
-    data  TEXT NOT NULL
+    id       TEXT PRIMARY KEY,
+    sport    TEXT NOT NULL,
+    -- Pembuat tim. Kosong untuk tim bawaan: pemiliknya bukan akun di sini.
+    owner_id TEXT,
+    data     TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS team_members (
@@ -317,8 +319,42 @@ export const DOMAIN_TABLES = [
   'venues',
 ] as const
 
+/**
+ * Kolom yang lahir setelah tabelnya pertama dibuat.
+ *
+ * `CREATE TABLE IF NOT EXISTS` tidak menyentuh tabel yang sudah ada, jadi
+ * basis data lama tidak akan pernah mendapatkannya — dan kegagalannya baru
+ * terlihat saat kolomnya dipakai, jauh dari penyebabnya.
+ */
+const ADDED_COLUMNS: { table: string; column: string; definition: string }[] = [
+  { table: 'teams', column: 'owner_id', definition: 'TEXT' },
+]
+
+async function addColumn(
+  sql: Sql,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const existing =
+    sql.dialect === 'postgres'
+      ? (
+          await sql.all<{ column_name: string }>(
+            'SELECT column_name FROM information_schema.columns WHERE table_name = ?',
+            [table],
+          )
+        ).map((r) => r.column_name)
+      : (await sql.all<{ name: string }>(`PRAGMA table_info(${table})`)).map((r) => r.name)
+
+  if (existing.includes(column)) return
+  await sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+
 export async function migrateDomain(sql: Sql): Promise<void> {
   await sql.exec(TABLES)
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    await addColumn(sql, table, column, definition)
+  }
 }
 
 export async function truncateDomain(sql: Sql): Promise<void> {

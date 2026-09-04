@@ -23,6 +23,7 @@ import { MatchScreen } from '@/routes/MatchScreen'
 import { MatchDetailScreen } from '@/routes/MatchDetailScreen'
 import { TournamentsScreen } from '@/routes/TournamentsScreen'
 import { TeamScreen } from '@/routes/TeamScreen'
+import { TeamNewScreen } from '@/routes/TeamNewScreen'
 import { ChatScreen } from '@/routes/ChatScreen'
 import { SparringScreen } from '@/routes/SparringScreen'
 import { SettingsScreen } from '@/routes/SettingsScreen'
@@ -107,6 +108,8 @@ export function App() {
           <Route path="/notifications" element={<NotificationsScreen />} />
           <Route path="/match/:id" element={<MatchDetailScreen />} />
           <Route path="/tournaments" element={<TournamentsScreen />} />
+          <Route path="/tim/baru" element={<TeamNewScreen />} />
+          <Route path="/tim/:id/ubah" element={<TeamNewScreen />} />
           <Route path="/team/:id" element={<TeamScreen />} />
           <Route path="/chat/:id" element={<ChatScreen />} />
           <Route path="/sparring" element={<SparringScreen />} />
