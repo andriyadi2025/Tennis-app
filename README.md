@@ -1,7 +1,8 @@
 # DBTC — Dukuh Bima Tennis Club
 
 Aplikasi booking lapangan olahraga + komunitas. Mobile-first web app berbentuk
-Android, jalan tanpa server — seluruh backend disimulasikan MSW.
+Android, dengan backend Express + SQLite (atau Postgres) yang melayani
+autentikasi maupun domain.
 
 > **Catatan merek.** App ini lahir sebagai "Lapangin", sebuah marketplace
 > multi-venue lintas cabang, lalu diganti merek jadi DBTC atas permintaan.
@@ -33,23 +34,27 @@ nomor HP dan email tetap bisa diselesaikan — kodenya ditampilkan di layar
 
 ## Perintah
 
-| Perintah             | Guna                                               |
-| -------------------- | -------------------------------------------------- |
-| `npm run dev`        | Dev server (MSW aktif otomatis)                    |
-| `npm run build`      | Typecheck + build produksi                         |
-| `npm run verify`     | `lint` + `typecheck` + `test` — gerbang sebelum PR |
-| `npm test`           | Vitest sekali jalan                                |
-| `npm run test:watch` | Vitest mode tonton                                 |
-| `npm run format`     | Prettier                                           |
+App butuh **dua proses**: server dan dev server. Tanpa server, tidak ada satu
+pun layar yang punya data — bukan lagi MSW yang mengisinya.
+
+| Perintah                | Guna                                                         |
+| ----------------------- | ------------------------------------------------------------ |
+| `npm run server`        | Server Express (auth + domain) di :4000 — **jalankan dulu**  |
+| `npm run dev`           | Dev server Vite di :5173, seluruh `/api` diteruskan ke :4000 |
+| `npm run build`         | Typecheck + build produksi                                   |
+| `npm run verify`        | `lint` + `typecheck` + `test` klien                          |
+| `npm run verify:server` | Typecheck + tes server                                       |
+| `npm run verify:all`    | Keduanya — gerbang sebelum PR                                |
+| `npm test`              | Vitest sekali jalan                                          |
+| `npm run format`        | Prettier                                                     |
 
 ---
 
 ## Autentikasi
 
-Auth **sudah nyata**: server Express + SQLite di `server/`, dengan sesi yang
-bisa dicabut, sandi ter-hash, OTP berbatas, dan OAuth 2.0. Sisa endpoint
-(venue, booking, turnamen) **masih dilayani MSW** di dalam browser. Migrasi
-bertahap, dan proxy `/api/auth` di `vite.config.ts` yang menandai batasnya.
+Server Express di `server/`, dengan sesi opaque yang bisa dicabut, sandi
+ter-hash scrypt, OTP berbatas, dan OAuth 2.0 + PKCE. Seluruh `/api` —
+autentikasi maupun domain — menuju server yang sama.
 
 | Metode             | Keadaan                                                   |
 | ------------------ | --------------------------------------------------------- |
@@ -57,6 +62,39 @@ bertahap, dan proxy `/api/auth` di `vite.config.ts` yang menandai batasnya.
 | Email + kata sandi | Jalan penuh, termasuk verifikasi email.                   |
 | Google             | Alur OAuth lengkap; menunggu `GOOGLE_CLIENT_ID/SECRET`.   |
 | Facebook           | Alur OAuth lengkap; menunggu `FACEBOOK_CLIENT_ID/SECRET`. |
+
+### Lupa kata sandi
+
+Balasannya **sama persis** untuk email terdaftar maupun tidak. Membedakannya
+mengubah endpoint ini jadi alat memeriksa alamat mana yang punya akun di
+sini, dan itu bisa dipakai siapa saja tanpa masuk.
+
+Mengganti sandi **mencabut seluruh sesi**. Kalau tidak, orang yang memakai
+sandi lama — termasuk yang membuat pemiliknya perlu me-reset — tetap masuk di
+perangkatnya, dan reset itu tidak menyelesaikan apa pun.
+
+Sandi divalidasi **sebelum** token dikonsumsi, supaya salah ketik tidak
+menghanguskan kode sekali-pakai.
+
+### Satu akun, beberapa cara masuk
+
+Nomor, email, Google, dan Facebook bisa menempel di satu akun lewat
+**Profil → Atur cara masuk**. Semuanya mendarat di akun yang sama, jadi
+booking, poin, dan riwayat main tidak terpecah.
+
+Tiga aturan yang menahannya:
+
+- **Selalu sisakan satu cara masuk.** Melepas yang terakhir mengunci orang
+  keluar dari akunnya secara permanen — tidak ada layar pemulihan yang bisa
+  menolong akun tanpa satu pun cara masuk.
+- **Email tanpa sandi tidak dihitung** sebagai cara masuk: tidak ada layar
+  yang menerima email saja. Menghitungnya membuat aturan di atas meloloskan
+  akun yang sebenarnya sudah terkunci. Melepas email ikut membuang sandinya.
+- **Nomor atau email milik akun lain ditolak**, bukan dipindahkan diam-diam.
+
+Sesi dibawa melewati putaran OAuth lewat baris `oauth_states` di basis data,
+bukan lewat URL: apa pun di URL bisa diubah pengguna, dan ini menentukan akun
+mana yang mendapat identitas baru.
 
 Yang tidak dikonfigurasi **melaporkan dirinya belum siap** — tombolnya
 dinonaktifkan dengan alasan, dan endpoint-nya membalas 501 yang menyebut
@@ -108,11 +146,12 @@ Empat lapisan, dari dalam ke luar. Aturannya satu arah: lapisan luar boleh
 mengimpor yang di dalam, tidak sebaliknya.
 
 ```
-src/types      ── model domain, tanpa dependensi apa pun
-   ▲
-src/lib        ── aturan bisnis murni (harga, poin, split bill, slot)
-   ▲              fungsi biasa, tanpa React, di sinilah tes unit menggigit
-src/mocks      ── backend tiruan: handler MSW + "database" in-memory
+shared/        ── model domain + aturan bisnis murni (harga, poin, stok, slot)
+   ▲              fungsi biasa, tanpa React, dipakai klien DAN server
+   │              di sinilah tes unit menggigit
+   ├───────────── server/  ── Express: kepemilikan, transaksi, SSE
+   │                         satu antarmuka SQL, dua driver
+   ▼
 src/hooks      ── TanStack Query membungkus HTTP; Zustand memegang state alur
 src/store
    ▲
@@ -129,31 +168,46 @@ tergandakan di dua layar dengan hasil berbeda.
 ### Peta folder
 
 ```
+shared/                    dipakai klien DAN server — satu definisi, bukan salinan
+├─ types.ts                Sport, Venue, Court, Slot, Booking, MerchItem, Complaint…
+├─ pricing.ts points.ts    harga dari slot terpilih; 1 pt / Rp1.000
+├─ slots.ts split.ts       pilihan bersambung; bagi rata, sisa ke host
+├─ activities.ts           catatan main diturunkan dari kejadian
+├─ merch.ts complaints.ts  stok & cara bayar; status aduan ikut percakapan
+└─ seed.ts dates.ts        data contoh; format Indonesia (date-fns locale id)
+
+server/
+├─ src/store/              satu antarmuka SQL, dua driver (SQLite, Postgres)
+├─ src/domain/
+│  ├─ schema.ts            tabel domain
+│  ├─ store.ts             akses data — semuanya per user_id
+│  ├─ routes.ts            seluruh endpoint /api/*
+│  ├─ slots.ts             grid slot dari booking sungguhan
+│  └─ events.ts            hub Server-Sent Events
+├─ src/auth.ts routes.ts   sesi, OTP, sandi, OAuth, penyambungan akun
+└─ src/config.ts           konfigurasi + pemeriksaan kesiapan deploy
+
 src/
-├─ types/index.ts          Sport, Venue, Court, Slot, Booking, SplitBill,
-│                          OpenMatch, Team, Tournament, Review, Notification, User
+├─ types/index.ts          penerus ke shared/types.ts
 ├─ lib/
-│  ├─ pricing.ts           harga dari slot terpilih (bukan tarif × jam)
-│  ├─ points.ts            1 pt / Rp1.000; tukar kelipatan 100; batas 30%
-│  ├─ split.ts             bagi rata, sisa pembulatan ke host
-│  ├─ slots.ts             pilihan harus bersambung; deteksi bentrok berulang
-│  ├─ dates.ts             format Indonesia (date-fns locale id)
+│  ├─ pricing.ts points.ts penerus tipis ke shared/ — aturannya tinggal di sana
+│  ├─ split.ts slots.ts    penerus tipis ke shared/
+│  ├─ dates.ts             penerus tipis ke shared/
 │  ├─ money.ts             Rp145.000 / Rp65rb (Intl id-ID)
 │  ├─ calendar.ts          pembangun berkas .ics (escaping + lipatan per oktet)
 │  ├─ share.ts             Web Share API dengan jalur mundur papan klip
 │  ├─ api.ts               pembungkus fetch + ApiError bertipe
 │  └─ storage.ts           localStorage bernamespace `lapangin:`
-├─ mocks/
-│  ├─ seed.ts              venue Bandung, nama Indonesia, harga rupiah
-│  ├─ db.ts                ketersediaan slot deterministik + booking in-memory
-│  ├─ handlers.ts          seluruh endpoint /api/*
-│  └─ browser.ts server.ts transport MSW untuk app dan untuk tes
+├─ mocks/                 hanya untuk tes komponen, bukan lagi untuk app
+│  ├─ handlers.ts          endpoint tiruan yang dipakai tes
+│  └─ server.ts            transport MSW untuk tes
 ├─ store/
 │  ├─ auth.ts              user + token, tersimpan di localStorage
 │  ├─ draft.ts             state machine alur booking
 │  └─ preferences.ts      area, radius, notifikasi per jenis, kurangi animasi
 ├─ hooks/
 │  ├─ queries.ts           seluruh hook TanStack Query
+│  ├─ useLiveChannel.ts    langganan SSE → batalkan cache query
 │  └─ useSearchFilters.ts  filter pencarian yang hidup di URL
 ├─ components/
 │  ├─ ui/                  Button, Icon, primitives, states (skeleton/empty/error)
@@ -282,13 +336,18 @@ hanya menyentuh kunci berprefiks `lapangin:`.
 
 ## Lapisan data
 
-`src/mocks/handlers.ts` melayani seluruh `/api/*` dengan latensi buatan
-300–800 ms supaya skeleton benar-benar terlihat (dimatikan otomatis saat tes).
+Seluruh `/api/*` dilayani server Express — lihat bagian **Backend**. Data
+tinggal di SQLite (atau Postgres), bukan di memori peramban, jadi apa yang
+dibooking satu orang benar-benar terlihat oleh yang lain.
 
-Ketersediaan slot dihitung dari hash FNV-1a atas `lapangan + tanggal + jam`,
-bukan `Math.random()`. Konsekuensinya penting: grid tidak berubah tiap render,
-dan pertanyaan "apakah Jumat depan jam 19.00 kosong?" selalu dijawab sama —
-tanpa itu deteksi bentrok jadwal berulang tidak bisa dipercaya.
+Ketersediaan slot ditentukan **dua hal saja**: booking yang sudah dibayar, dan
+jam yang sudah lewat. Server tiruan yang digantikannya menebak keterisian dari
+hash id lapangan supaya grid tampak ramai tanpa ada booking apa pun; grid yang
+lengang di server baru memang menggambarkan keadaannya.
+
+`src/mocks/` tetap ada untuk **tes komponen**. Di sana memakai server
+sungguhan justru membuat tes bergantung pada proses lain yang harus hidup
+lebih dulu.
 
 ### Memicu state error
 
@@ -305,8 +364,8 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm run verify:all` menjalankan keduanya — **273 tes**: 230 frontend
-(22 berkas) dan 43 server (2 berkas).
+`npm run verify:all` menjalankan keduanya — **341 tes**: 230 frontend
+(22 berkas) dan 111 server (5 berkas).
 
 Tes server menembak app Express yang sama dengan yang dijalankan produksi,
 lewat HTTP sungguhan — jadi yang diuji bukan cuma logikanya tapi juga
@@ -328,8 +387,10 @@ rata-rata, terima/tolak ajakan sparring, pembayaran biaya daftar turnamen
 (termasuk bukti kuota tidak bergerak sebelum dibayar), dan preferensi yang
 benar-benar mengubah tampilan.
 
-Tes komponen memakai handler MSW yang sama dengan app, jadi yang diuji kontrak
-sungguhan — bukan mock yang ditulis ulang khusus untuk tes.
+Tes komponen memakai handler MSW; tes server menembak app Express yang sama
+dengan yang dijalankan produksi. Aturan bisnisnya sendiri diuji sekali di
+`shared/` — kedua sisi memanggil fungsi yang sama, jadi mengujinya dua kali
+hanya menguji dua pemanggil dari satu kode.
 
 ### Satu hal khusus di setup tes
 
@@ -409,40 +470,141 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 10. **Satu bahasa (Indonesia).** Tidak ada infrastruktur i18n; teks ditulis
     langsung di komponen.
 
-## Yang masih mock
+## Backend
+
+Satu server Express melayani dua hal: **autentikasi** di `/api/auth` dan
+**domain** di `/api`. Keduanya memakai basis data yang sama lewat satu
+antarmuka, dan bisa berjalan di atas SQLite maupun Postgres tanpa satu baris
+query pun berubah.
+
+### Kenapa domainnya dipindahkan dari MSW
+
+Selama domainnya dilayani MSW di dalam browser, hanya ada **satu orang**. Itu
+enak untuk merancang layar — tidak ada proses lain yang harus hidup — tapi
+menyembunyikan satu hal yang tidak pernah bisa diuji di sana: kepemilikan.
+"Booking siapa ini" bukan pertanyaan yang bisa salah dijawab kalau cuma ada
+satu jawaban.
+
+Yang langsung terlihat begitu ada dua orang:
+
+| Sebelum (MSW)                          | Sekarang                                  |
+| -------------------------------------- | ----------------------------------------- |
+| Slot terisi ditebak dari hash id       | Hanya booking sungguhan yang menutup slot |
+| Poin ditukar sebanyak yang klien minta | Dibatasi saldo di server                  |
+| Semua booking terlihat                 | Booking orang lain menjawab 404           |
+| Poin belanja masuk saat ringkasan      | Masuk saat dibayar                        |
+
+MSW **masih dipakai**, tapi hanya untuk tes komponen: di sana memakai server
+sungguhan justru membuat tes bergantung pada proses lain yang harus hidup
+lebih dulu.
+
+### Aturan tidak ditulis dua kali
+
+Perhitungan harga, poin, stok, jadwal, dan status aduan tinggal di
+`shared/`. Klien dan server mengimpor **berkas yang sama**, bukan salinan.
+Menyalinnya berarti dua kesempatan untuk berbeda, dan yang berbeda biasanya
+yang jarang dijalankan.
+
+```
+shared/         types, pricing, points, slots, split, activities, merch,
+                complaints, dates, seed  ← dipakai klien DAN server
+src/lib/*.ts    penerus tipis ke shared/, supaya impor `@/lib/...` tetap sama
+server/src/     store, routes, events — yang khusus server
+```
+
+### SQLite atau Postgres
+
+`DATABASE_URL` yang menentukan. Kalau diisi, Postgres; kalau tidak, berkas
+SQLite. Satu variabel, bukan dua yang bisa bertentangan.
+
+SQLite cukup untuk satu instance dan tidak perlu dipasang. Begitu app
+dijalankan lebih dari satu proses, berkas SQLite tidak bisa dibagi — dan
+membaginya lewat disk jaringan adalah cara yang sudah dikenal untuk
+merusaknya.
+
+Yang membuat perpindahan itu mungkin bukan "SQL-nya standar", melainkan tidak
+adanya kode lain yang menyentuh driver. Konsekuensinya: **seluruh akses basis
+data async**, termasuk driver SQLite yang sebenarnya sinkron. Kalau
+antarmukanya sinkron, Postgres tidak akan pernah bisa masuk tanpa menulis
+ulang setiap pemanggil — dan penulisan ulang itulah yang biasanya tidak
+pernah terjadi.
+
+Adapter Postgres diuji terhadap **pg-mem**, bukan cuma di-typecheck. Dua hal
+tidak bisa diuji di sana dan dikatakan apa adanya di tesnya: pg-mem tidak
+menghormati `ROLLBACK`, dan menolak menjalankan ulang
+`CREATE TABLE IF NOT EXISTS` yang punya primary key. Keduanya diuji di
+SQLite. **Postgres sungguhan masih perlu dibuktikan di CI.**
+
+### Realtime
+
+Server-Sent Events, bukan WebSocket: yang dibutuhkan cuma satu arah — server
+memberi tahu klien bahwa ada yang berubah. SSE jalan di atas HTTP biasa,
+lewat proxy yang sama, tanpa protokol kedua yang perlu diamankan sendiri, dan
+browser menyambung ulang otomatis.
+
+Event hanya berkata _"utas ini berubah"_; isinya tetap diambil lewat endpoint
+biasa. Dengan begitu tidak ada dua jalur data yang bisa menyimpang, dan pesan
+yang terlewat saat koneksi putus tetap ikut terbaca pada pengambilan
+berikutnya. Menaruh isi pesan di dalam event berarti kehilangan koneksi sama
+dengan kehilangan pesan.
+
+Dipakai obrolan grup, aduan, dan negosiasi sparring.
+
+## Menyiapkan produksi
+
+```bash
+TOKEN_PEPPER="$(openssl rand -base64 48)" DATABASE_URL=postgres://… npm start
+```
+
+Server **menolak start** di produksi kalau ada masalah fatal:
+
+| Setting        | Fatal kalau                                              |
+| -------------- | -------------------------------------------------------- |
+| `TOKEN_PEPPER` | masih nilai bawaan repositori, atau di bawah 32 karakter |
+| `APP_ORIGIN`   | bukan HTTPS                                              |
+
+Pepper diperiksa terhadap **nilainya**, bukan sekadar "apakah variabelnya
+diisi": menyalin nilai dari repositori ke `.env` tetap meninggalkan pepper
+yang sudah publik, dan setiap token sesi jadi bisa dipalsukan siapa pun yang
+pernah membaca repo ini.
+
+Di luar produksi hanya diberitahukan, tidak memblokir — menghalangi
+`npm run dev` karena pepper bawaan akan membuat orang menghapus
+pemeriksaannya.
+
+**Mengganti `TOKEN_PEPPER` mencabut seluruh sesi dan OTP yang sedang
+berjalan**, karena keduanya di-hash dengannya. Itu memang gunanya saat
+darurat; jangan dilakukan tanpa sengaja.
+
+`GET /api/health` melaporkan hal yang sama. Deploy yang salah konfigurasi
+tampak persis sama dengan yang benar dari luar; ini yang membedakannya tanpa
+perlu membaca log start-up.
+
+## Yang masih mock atau belum ada
 
 - **Venue selain klub** masih data contoh Bandung. Data klub sendiri diisi
   lewat dasbor admin — lihat bagian "Dasbor admin klub".
+- **Pembayaran.** Tidak ada gateway, untuk booking maupun toko. Menekan Bayar
+  langsung mengonfirmasi; QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode
+  bayar sungguhan.
 - **Iuran keanggotaan** hanya angka yang ditampilkan; belum ada penagihan
   maupun status anggota yang kedaluwarsa.
-- **Seluruh backend.** Tidak ada server, tidak ada database. Datanya hidup di
-  memori dan disalin ke localStorage peramban ini saja — tidak ada yang sampai
-  ke perangkat lain, dan snapshot dibuang saat harinya berganti.
-- **Pembayaran.** Tidak ada gateway. Menekan Bayar langsung mengonfirmasi;
-  QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode bayar sungguhan.
-- **Foto venue.** Blok warna beraksen, bukan foto.
-- **Verifikasi nomor HP lewat SMS sungguhan** menunggu akun Twilio; alurnya
-  sudah lengkap, hanya salurannya yang masih log server.
-- **Lupa kata sandi** belum ada. Tabel dan tipenya sudah menyiapkan tujuan
-  `reset`, tapi layar dan endpoint-nya belum dibuat.
-- **Menautkan akun** sesudah masuk (mis. menambah Google ke akun yang sudah
-  ada) belum ada; penautan hanya terjadi otomatis saat emailnya cocok.
+- **Foto venue dan barang toko.** Blok warna beraksen, bukan foto.
+- **SMS dan email sungguhan** menunggu Twilio dan SMTP; alurnya sudah lengkap,
+  hanya salurannya yang masih log server.
 - **Notifikasi push** tidak ada, dan sengaja tidak dipalsukan: push sungguhan
-  butuh service worker dengan kunci VAPID dan server yang mengirim — tanpa itu
-  yang bisa dibuat hanyalah tiruan yang menyesatkan. Yang ada: daftar notifikasi
-  di dalam app, dengan preferensi per jenis yang benar-benar berlaku.
-- **Chat** mengirim pesan ke store tiruan; tidak ada realtime, karena itu juga
-  butuh server (WebSocket atau SSE). Polling bisa saja dipasang, tapi itu meniru
-  bentuknya tanpa memberi sifatnya.
-- **Pembayaran toko** memakai jalur tiruan yang sama dengan booking: metode
-  dicatat, tapi tidak ada gerbang pembayaran sungguhan di baliknya.
+  butuh service worker dengan kunci VAPID dan server yang mengirim. Yang ada:
+  daftar notifikasi di dalam app, dengan preferensi per jenis yang berlaku,
+  plus SSE yang memperbarui layar yang sedang dibuka.
 - **Pengiriman barang** tidak ada sama sekali — semua pesanan diambil di klub.
   Itu keputusan, bukan kekurangan; menambahkannya butuh alamat, kurir, dan
   pelacakan, yang tidak ada gunanya dipalsukan.
-- **Notifikasi aduan** belum ada. Balasan klub baru terlihat kalau anggota
-  membuka layar Bantuan — push memerlukan server notifikasi.
-- **Waktu sparring** belum bisa dinegosiasikan — ajakan keluar dikirim tanpa
-  usulan jam, dan menerima ajakan tidak otomatis mengunci lapangan.
+- **Tim sendiri** masih satu tim tetap (`Garuda Muda FC`) sebagai pengirim
+  ajakan sparring; belum ada pembuatan tim oleh user.
+- **Menggabungkan dua akun** yang terlanjur terpisah belum ada. Menyambungkan
+  nomor atau email yang sudah dipakai akun lain ditolak dengan jelas, bukan
+  dipindahkan diam-diam — memutuskan booking dan poin siapa yang bertahan
+  bukan keputusan milik endpoint.
 
 ## Poin & riwayat main
 
@@ -569,6 +731,27 @@ Lencana di dasbor menghitung hal yang sama.
 Aduan bisa dikaitkan dengan booking atau pesanan toko. Opsional, tapi
 ditawarkan lebih dulu — aduan yang menyebut kode transaksi bisa
 ditindaklanjuti tanpa bertanya balik.
+
+## Sparring: waktunya dinegosiasikan
+
+Menerima ajakan tanpa waktu yang disepakati tidak menghasilkan apa pun yang
+bisa dicatat sebagai kegiatan, jadi server menolaknya dan meminta jamnya
+diusulkan lebih dulu.
+
+| Kejadian                                 | Akibatnya                                       |
+| ---------------------------------------- | ----------------------------------------------- |
+| Usulan waktu dikirim                     | Ajakan memakai jam itu, status "Menunggu"       |
+| Usulan baru masuk                        | Usulan lama ditandai **diganti**, bukan dihapus |
+| Ajakan yang sudah diterima ditawar ulang | Terbuka lagi jadi "Menunggu"                    |
+| Ajakan diterima                          | Usulan terakhir ditandai **diterima**           |
+
+Usulan lama disimpan karena riwayat tawar-menawar itulah yang menjelaskan
+bagaimana kedua tim sampai pada jam yang disepakati — dan itu persis yang
+dicari saat salah satu pihak merasa jamnya bukan yang ia setujui.
+
+Usulan dari lawan masuk lewat SSE. Tawar-menawar jam yang balasannya baru
+terlihat setelah halaman dimuat ulang bukan tawar-menawar, itu
+surat-menyurat.
 
 ## Dasbor admin klub
 
