@@ -80,6 +80,18 @@
     display: none;
   }
 
+  /* Latar gelap di belakang bottom sheet.
+
+     Sebelumnya tiap sheet menulis `bg-neutral-900/50` langsung. Modifier
+     alfa Tailwind mengharapkan tokennya berupa channel telanjang, sementara
+     token di sini hex penuh — hasilnya deklarasi tak sah, dan latarnya
+     benar-benar transparan tanpa satu pun peringatan. Sheet tetap muncul,
+     jadi tidak ada yang menyadarinya. `color-mix` memakai token yang sama
+     tanpa menanam warna baru. */
+  .sheet-backdrop {
+    background-color: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+  }
+
   .row-scroll {
     overflow-x: auto;
     scrollbar-width: none;

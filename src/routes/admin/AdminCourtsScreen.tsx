@@ -209,7 +209,7 @@ function CourtSheet({
       role="dialog"
       aria-modal="true"
       aria-label={court ? `Ubah ${court.name}` : 'Tambah lapangan'}
-      className="absolute inset-0 z-20 flex flex-col justify-end bg-neutral-900/50"
+      className="sheet-backdrop absolute inset-0 z-20 flex flex-col justify-end"
     >
       <button
         type="button"

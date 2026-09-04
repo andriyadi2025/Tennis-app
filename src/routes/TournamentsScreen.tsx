@@ -165,7 +165,7 @@ function EntryFeeSheet({
       role="dialog"
       aria-modal="true"
       aria-label={`Bayar biaya daftar ${tournament.name}`}
-      className="absolute inset-0 z-20 flex flex-col justify-end bg-neutral-900/50"
+      className="sheet-backdrop absolute inset-0 z-20 flex flex-col justify-end"
     >
       {/* Ketuk latar untuk menutup — jalan keluar yang tidak perlu dicari. */}
       <button
