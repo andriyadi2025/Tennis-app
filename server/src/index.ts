@@ -1,6 +1,7 @@
 import { createApp } from './app.ts'
 import { assertReady, config, providerStatus } from './config.ts'
 import { db, purgeExpired } from './db.ts'
+import { seedDomain } from './domain/store.ts'
 
 /*
  * Kesiapan diperiksa sebelum port dibuka.
@@ -11,6 +12,10 @@ import { db, purgeExpired } from './db.ts'
  * siapa pun yang pernah membuka repositori ini.
  */
 assertReady()
+
+// Skema domain dibuat dan data referensi diisi sebelum port dibuka, supaya
+// permintaan pertama tidak mendarat di tabel yang belum ada.
+await seedDomain()
 
 // Baris kedaluwarsa dibersihkan berkala, bukan di jalur permintaan.
 setInterval(() => {

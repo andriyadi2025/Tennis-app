@@ -8,7 +8,9 @@ import './styles/global.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Data mock berubah pelan; refetch saat fokus hanya bikin skeleton berkedip.
+      // Data domain berubah pelan; refetch saat fokus hanya bikin skeleton
+      // berkedip. Yang benar-benar perlu segera terlihat — pesan obrolan —
+      // datang lewat SSE, bukan lewat polling.
       refetchOnWindowFocus: false,
       retry: 1,
       staleTime: 30_000,
@@ -16,15 +18,15 @@ const queryClient = new QueryClient({
   },
 })
 
-/** MSW adalah satu-satunya backend — app tidak boleh render sebelum siap. */
-async function bootstrap(): Promise<void> {
-  const { worker } = await import('./mocks/browser')
-  await worker.start({
-    onUnhandledRequest: 'bypass',
-    quiet: true,
-    serviceWorker: { url: `${import.meta.env.BASE_URL}mockServiceWorker.js` },
-  })
-
+/*
+ * Tidak ada lagi backend tiruan di dalam browser.
+ *
+ * Seluruh /api sekarang menuju server Express yang sama dengan yang
+ * dijalankan produksi. MSW tetap ada, tapi hanya untuk tes komponen: di sana
+ * memakai server sungguhan justru membuat tes bergantung pada proses lain
+ * yang harus hidup lebih dulu.
+ */
+function bootstrap(): void {
   const container = document.getElementById('root')
   if (!container) throw new Error('#root tidak ditemukan')
 
@@ -39,4 +41,4 @@ async function bootstrap(): Promise<void> {
   )
 }
 
-void bootstrap()
+bootstrap()

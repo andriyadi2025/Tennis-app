@@ -1,8 +1,27 @@
+import { STORAGE_KEYS, readJson } from './storage'
+
 /**
  * Pembungkus fetch tipis. Error HTTP dilempar sebagai `ApiError` supaya
  * TanStack Query bisa membedakan "gagal jaringan" dari "slot keburu diambil",
  * dan UI bisa menampilkan pesan yang tepat alih-alih "Something went wrong".
+ *
+ * Tiap permintaan membawa token sesi. Dulu tidak perlu — domainnya dilayani
+ * MSW di dalam browser, jadi tidak ada yang perlu dibuktikan. Sekarang server
+ * yang menentukan booking dan poin siapa yang dikembalikan, dan itu ditentukan
+ * token, bukan badan permintaan yang bisa ditulis siapa saja.
  */
+
+function sessionToken(): string | null {
+  // Dibaca dari penyimpanan, bukan dari store Zustand: `api.ts` dipakai juga
+  // di luar pohon React, dan mengimpor store dari sini membuat lingkaran
+  // ketergantungan antara lapisan jaringan dan lapisan state.
+  return readJson<{ token: string | null }>(STORAGE_KEYS.auth, { token: null }).token
+}
+
+function authHeaders(extra: HeadersInit = {}): HeadersInit {
+  const token = sessionToken()
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : extra
+}
 export class ApiError extends Error {
   readonly status: number
   readonly code: string | null
@@ -39,7 +58,7 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal })
+  const response = await fetch(path, { signal, headers: authHeaders() })
   if (!response.ok) throw await parseError(response)
   return (await response.json()) as T
 }
@@ -52,7 +71,7 @@ async function send<T>(
 ): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: authHeaders(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   })
@@ -71,7 +90,7 @@ export function apiDelete<T>(path: string, signal?: AbortSignal): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
     signal,
   })

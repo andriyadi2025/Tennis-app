@@ -65,6 +65,7 @@ export const queryKeys = {
   adminMerchOrders: ['admin-merch-orders'] as const,
   complaints: ['complaints'] as const,
   complaint: (id: string) => ['complaint', id] as const,
+  proposals: (id: string) => ['sparring', id, 'proposals'] as const,
 }
 
 export interface VenueSearchParams {
@@ -666,6 +667,55 @@ export function useSetComplaintStatus(id: string | undefined) {
     onSuccess: (complaint) => {
       client.setQueryData(queryKeys.complaint(complaint.id), complaint)
       void client.invalidateQueries({ queryKey: queryKeys.complaints })
+    },
+  })
+}
+
+/* ── Negosiasi waktu sparring ──────────────────────────────────────────── */
+
+export interface SparringProposal {
+  id: string
+  sparringId: string
+  /** 'tuan' = pengirim ajakan, 'lawan' = yang diajak. */
+  bySide: 'tuan' | 'lawan'
+  byName: string
+  proposedAt: string
+  venueName: string | null
+  note: string
+  status: 'menunggu' | 'diterima' | 'diganti'
+  createdAt: string
+}
+
+export function useSparringProposals(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.proposals(id ?? ''),
+    queryFn: ({ signal }) => apiGet<SparringProposal[]>(`/api/sparring/${id}/proposals`, signal),
+    enabled: Boolean(id),
+  })
+}
+
+export interface ProposeInput {
+  proposedAt: string
+  venueName?: string
+  note?: string
+}
+
+/**
+ * Mengusulkan waktu baru. Usulan yang masuk membuka kembali ajakan yang sudah
+ * dijawab — waktu yang berubah berarti kesepakatannya berubah — jadi daftar
+ * ajakan ikut dibatalkan cache-nya.
+ */
+export function useProposeSparring(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ProposeInput) =>
+      apiPost<{ invite: SparringInvite; proposals: SparringProposal[] }>(
+        `/api/sparring/${id}/propose`,
+        input,
+      ),
+    onSuccess: ({ proposals }) => {
+      client.setQueryData(queryKeys.proposals(id ?? ''), proposals)
+      void client.invalidateQueries({ queryKey: queryKeys.sparring })
     },
   })
 }

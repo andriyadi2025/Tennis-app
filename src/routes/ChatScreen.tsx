@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import clsx from 'clsx'
 import { Check, Send, Users } from 'lucide-react'
 import type { ChatMessage, SplitBill } from '@/types'
-import { useBooking, useChat, useSendMessage } from '@/hooks/queries'
+import { queryKeys, useBooking, useChat, useSendMessage } from '@/hooks/queries'
+import { useLiveChannel } from '@/hooks/useLiveChannel'
 import { useAuthStore } from '@/store/auth'
 import { useDraftStore } from '@/store/draft'
 import { amountFor, paidAmount, paidRatio, splitTotal, togglePaid } from '@/lib/split'
@@ -19,6 +20,13 @@ export function ChatScreen() {
   const { id } = useParams<{ id: string }>()
   const chat = useChat(id)
   const send = useSendMessage(id)
+
+  /*
+   * Pesan orang lain masuk lewat SSE, bukan polling. Polling berarti memilih
+   * antara boros permintaan atau pesan yang telat — dan obrolan yang telat
+   * beberapa detik terasa rusak, bukan lambat.
+   */
+  useLiveChannel(id ? `/api/chats/${id}/stream` : null, [queryKeys.chat(id ?? '')])
   const me = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)

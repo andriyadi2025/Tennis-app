@@ -4,7 +4,8 @@ import clsx from 'clsx'
 import { Send } from 'lucide-react'
 import type { Complaint, ComplaintMessage, ComplaintStatus } from '@/types'
 import { COMPLAINT_CATEGORY_LABEL, COMPLAINT_STATUS_LABEL } from '@/types'
-import { useComplaint, useReplyComplaint, useSetComplaintStatus } from '@/hooks/queries'
+import { queryKeys, useComplaint, useReplyComplaint, useSetComplaintStatus } from '@/hooks/queries'
+import { useLiveChannel } from '@/hooks/useLiveChannel'
 import { useAuthStore } from '@/store/auth'
 import { validateReply } from '@/lib/complaints'
 import { formatDateLong, formatRelative } from '@/lib/dates'
@@ -28,6 +29,12 @@ export function ComplaintScreen() {
   const complaint = useComplaint(id)
   const reply = useReplyComplaint(id)
   const setStatus = useSetComplaintStatus(id)
+
+  // Balasan klub muncul tanpa perlu menutup dan membuka layar ini lagi.
+  useLiveChannel(id ? `/api/complaints/${id}/stream` : null, [
+    queryKeys.complaint(id ?? ''),
+    queryKeys.complaints,
+  ])
   const isAdmin = useAuthStore((s) => s.user?.role) === 'admin'
   const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)

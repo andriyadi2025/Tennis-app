@@ -2,6 +2,7 @@ import express from 'express'
 import { config, providerStatus, readiness } from './config.ts'
 import { db } from './db.ts'
 import { routes } from './routes.ts'
+import { domainRoutes } from './domain/routes.ts'
 
 /**
  * Pabrik app dipisah dari listener supaya tes bisa memakai app yang sama
@@ -47,6 +48,14 @@ export function createApp() {
   })
 
   app.use('/api/auth', routes)
+
+  /*
+   * Domain dipasang setelah auth, di prefiks yang sama-sama `/api`. Dulu
+   * seluruh bagian ini dilayani MSW di dalam browser: enak untuk merancang
+   * layar, tapi tidak pernah menguji kepemilikan — di browser hanya ada satu
+   * orang, jadi "booking siapa ini" tidak pernah jadi pertanyaan.
+   */
+  app.use('/api', domainRoutes)
 
   // Penanganan error terakhir — stack tidak pernah dibocorkan ke klien.
   app.use(

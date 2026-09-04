@@ -12,6 +12,7 @@
     "verify": "npm run typecheck && npm run test"
   },
   "dependencies": {
+    "date-fns": "^4.4.0",
     "express": "^5.2.1",
     "nodemailer": "^6.10.1",
     "pg": "^8.23.0",

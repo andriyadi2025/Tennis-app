@@ -25,3 +25,10 @@ dist-ssr
 
 # Coverage
 coverage
+
+# Basis data lokal, di mana pun ia dibuat. Pola sebelumnya hanya menutup
+# server/, jadi menjalankan server dari direktori lain meninggalkan berkas
+# yang ikut ter-stage tanpa disadari.
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

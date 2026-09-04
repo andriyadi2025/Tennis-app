@@ -12,6 +12,9 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    /* shared/ diimpor dengan ekstensi .ts eksplisit supaya berkas yang sama
+       bisa dibaca Node di server tanpa alias apa pun. */
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "resolveJsonModule": true,
     "baseUrl": ".",
@@ -25,5 +28,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src", "shared"]
 }

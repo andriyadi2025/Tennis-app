@@ -9,14 +9,24 @@ export default defineConfig({
   server: {
     port: Number(process.env.PORT) || 5173,
     /*
-     * Hanya /api/auth yang diteruskan ke server sungguhan. Sisa endpoint
-     * masih dilayani MSW di dalam browser — migrasi bertahap, dan proxy ini
-     * yang menandai batasnya.
+     * Seluruh /api diteruskan ke server sungguhan — auth maupun domain.
+     * MSW tidak lagi hidup di browser; ia tinggal dipakai tes komponen,
+     * tempat backend sungguhan justru akan membuat tes bergantung pada
+     * proses lain yang harus hidup.
      */
     proxy: {
-      '/api/auth': {
+      '/api': {
         target: process.env.AUTH_SERVER ?? 'http://localhost:4000',
         changeOrigin: true,
+        // SSE tidak boleh di-buffer proxy, kalau tidak pesannya baru sampai
+        // saat koneksinya tutup.
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            if (proxyRes.headers['content-type']?.includes('text/event-stream')) {
+              proxyRes.headers['cache-control'] = 'no-cache, no-transform'
+            }
+          })
+        },
       },
     },
   },
