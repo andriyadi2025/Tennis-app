@@ -213,9 +213,7 @@ describe('OAuth tanpa kredensial', () => {
   })
 
   it('menolak callback dengan state karangan', async () => {
-    const { status, location } = await get(
-      '/api/auth/oauth/google/callback?code=abc&state=palsu',
-    )
+    const { status, location } = await get('/api/auth/oauth/google/callback?code=abc&state=palsu')
     expect(status).toBe(302)
     expect(location).toContain('error=bad_state')
   })

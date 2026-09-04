@@ -71,10 +71,14 @@ db.exec(`
   );
 
   -- State OAuth beserta verifier PKCE-nya, umur pendek.
+  -- Kolom link_user_id terisi kalau putaran ini untuk menyambung penyedia ke
+  -- akun yang sudah masuk, bukan untuk masuk. Sesi tidak bisa dititipkan lewat
+  -- URL balik dari penyedia, jadi ia dititipkan di baris state ini.
   CREATE TABLE IF NOT EXISTS oauth_states (
     state         TEXT PRIMARY KEY,
     provider      TEXT NOT NULL,
     code_verifier TEXT NOT NULL,
+    link_user_id  TEXT REFERENCES users(id) ON DELETE CASCADE,
     created_at    TEXT NOT NULL,
     expires_at    TEXT NOT NULL
   );
@@ -83,6 +87,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_identities_user ON identities(user_id);
 `)
+
+/**
+ * Kolom yang ditambahkan setelah skema pertama dirilis.
+ *
+ * `CREATE TABLE IF NOT EXISTS` tidak menyentuh tabel yang sudah ada, jadi
+ * basis data yang dibuat sebelum kolom ini ada tidak akan pernah
+ * mendapatkannya — dan kegagalannya baru terlihat saat kolomnya dipakai.
+ * Ditambahkan di sini, sekali, dan aman diulang.
+ */
+function addColumnIfMissing(table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (columns.some((c) => c.name === column)) return
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+}
+
+addColumnIfMissing('oauth_states', 'link_user_id', 'TEXT')
 
 export interface UserRow {
   id: string

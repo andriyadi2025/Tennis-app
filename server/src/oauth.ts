@@ -63,8 +63,18 @@ export function redirectUri(name: ProviderName): string {
   return `${config.appOrigin.replace(/\/$/, '')}/api/auth/oauth/${name}/callback`
 }
 
-/** Menyiapkan state + PKCE lalu mengembalikan URL untuk dikunjungi pengguna. */
-export function beginOAuth(name: ProviderName): { url: string; state: string } | null {
+/**
+ * Menyiapkan state + PKCE lalu mengembalikan URL untuk dikunjungi pengguna.
+ *
+ * `linkUserId` diisi kalau putaran ini untuk menyambungkan penyedia ke akun
+ * yang sudah masuk. Ia dititipkan di baris state, bukan di URL: apa pun yang
+ * ditaruh di URL bisa diubah pengguna, dan ini menentukan akun mana yang
+ * mendapat identitas baru.
+ */
+export function beginOAuth(
+  name: ProviderName,
+  linkUserId: string | null = null,
+): { url: string; state: string } | null {
   const credentials = providerConfig(name)
   if (!credentials) return null
 
@@ -73,11 +83,12 @@ export function beginOAuth(name: ProviderName): { url: string; state: string } |
   const verifier = newCodeVerifier()
 
   db.prepare(
-    'INSERT INTO oauth_states (state, provider, code_verifier, created_at, expires_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO oauth_states (state, provider, code_verifier, link_user_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
   ).run(
     state,
     name,
     verifier,
+    linkUserId,
     new Date().toISOString(),
     new Date(Date.now() + 10 * 60_000).toISOString(),
   )
@@ -100,14 +111,15 @@ export function beginOAuth(name: ProviderName): { url: string; state: string } |
 interface StateRow {
   provider: string
   code_verifier: string
+  /** Terisi kalau putaran ini menyambung, bukan masuk. */
+  link_user_id: string | null
   expires_at: string
 }
 
 /** State sekali pakai: dihapus begitu diambil, sah atau tidak. */
 export function takeOAuthState(state: string): StateRow | null {
   const row = db.prepare('SELECT * FROM oauth_states WHERE state = ?').get(state) as
-    | StateRow
-    | undefined
+    StateRow | undefined
   if (!row) return null
   db.prepare('DELETE FROM oauth_states WHERE state = ?').run(state)
   if (new Date(row.expires_at).getTime() <= Date.now()) return null

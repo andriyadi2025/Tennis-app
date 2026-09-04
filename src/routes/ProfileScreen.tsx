@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CreditCard,
   LifeBuoy,
+  Link2,
   Receipt,
   Settings,
   ShoppingBag,
@@ -357,6 +358,17 @@ function IdentitySection({
       {!account.phone && !account.email && identities.length === 0 && (
         <p className="text-base text-neutral-700">Belum ada kontak yang tercatat.</p>
       )}
+
+      <Link
+        to="/akun/cara-masuk"
+        className="flex min-h-touch items-center gap-3.5 rounded-md bg-surface px-4 py-3"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill bg-neutral-200 text-neutral-800">
+          <Icon icon={Link2} size={18} />
+        </span>
+        <span className="flex-1 text-base font-semibold">Atur cara masuk</span>
+        <Icon icon={ChevronRight} size={17} className="text-neutral-600" />
+      </Link>
     </section>
   )
 }

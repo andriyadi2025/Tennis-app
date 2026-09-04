@@ -216,7 +216,11 @@ export function issueOtp(phone: string, at: Date = new Date()): OtpIssue {
 
 export type OtpCheck =
   | { ok: true }
-  | { ok: false; reason: 'notFound' | 'expired' | 'tooManyAttempts' | 'wrong'; attemptsLeft: number }
+  | {
+      ok: false
+      reason: 'notFound' | 'expired' | 'tooManyAttempts' | 'wrong'
+      attemptsLeft: number
+    }
 
 export function verifyOtp(phone: string, code: string, at: Date = new Date()): OtpCheck {
   const row = db
@@ -257,10 +261,7 @@ export function issueEmailToken(userId: string, purpose: 'verify' | 'reset'): st
   return token
 }
 
-export function consumeEmailToken(
-  token: string,
-  purpose: 'verify' | 'reset',
-): UserRow | undefined {
+export function consumeEmailToken(token: string, purpose: 'verify' | 'reset'): UserRow | undefined {
   const hash = hashToken(token)
   const row = db
     .prepare('SELECT user_id, purpose, expires_at FROM email_tokens WHERE token_hash = ?')
@@ -299,7 +300,87 @@ export function linkIdentity(
 }
 
 export function identitiesFor(userId: string): { provider: string; email: string | null }[] {
-  return db
-    .prepare('SELECT provider, email FROM identities WHERE user_id = ?')
-    .all(userId) as { provider: string; email: string | null }[]
+  return db.prepare('SELECT provider, email FROM identities WHERE user_id = ?').all(userId) as {
+    provider: string
+    email: string | null
+  }[]
+}
+
+/* ── Ganti sandi & cabut sesi ────────────────────────────────────────────── */
+
+export function setPassword(userId: string, passwordHash: string): void {
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId)
+}
+
+/**
+ * Semua sesi dicabut setelah sandi diganti.
+ *
+ * Kalau tidak, orang yang memakai sandi lama — termasuk yang membuat
+ * pemiliknya perlu me-reset — tetap masuk di perangkatnya sendiri, dan
+ * reset itu tidak menyelesaikan apa pun.
+ */
+export function revokeAllSessions(userId: string): number {
+  const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId)
+  return Number(changes)
+}
+
+/* ── Menyambung & melepas cara masuk ─────────────────────────────────────── */
+
+export type SignInMethod = 'phone' | 'email' | 'google' | 'facebook'
+
+/**
+ * Cara masuk yang benar-benar bisa dipakai akun ini.
+ *
+ * Email tanpa sandi **tidak** dihitung: tidak ada layar yang menerima email
+ * saja. Menghitungnya akan membuat aturan "sisakan minimal satu" meloloskan
+ * akun yang sebenarnya sudah terkunci.
+ */
+export function signInMethods(user: UserRow): SignInMethod[] {
+  const methods: SignInMethod[] = []
+  if (user.phone && user.phone_verified === 1) methods.push('phone')
+  if (user.email && user.password_hash) methods.push('email')
+  for (const { provider } of identitiesFor(user.id)) {
+    if (provider === 'google' || provider === 'facebook') methods.push(provider)
+  }
+  return methods
+}
+
+export function attachPhone(userId: string, phone: string): void {
+  db.prepare('UPDATE users SET phone = ?, phone_verified = 1 WHERE id = ?').run(phone, userId)
+}
+
+export function attachEmail(userId: string, email: string, passwordHash: string | null): void {
+  db.prepare(
+    'UPDATE users SET email = ?, email_verified = 0, password_hash = COALESCE(?, password_hash) WHERE id = ?',
+  ).run(email, passwordHash, userId)
+}
+
+export function detachPhone(userId: string): void {
+  db.prepare('UPDATE users SET phone = NULL, phone_verified = 0 WHERE id = ?').run(userId)
+}
+
+/**
+ * Melepas email ikut membuang sandinya. Sandi tanpa email tidak bisa dipakai
+ * masuk lewat layar mana pun, jadi meninggalkannya cuma menyisakan kredensial
+ * menganggur di basis data.
+ */
+export function detachEmail(userId: string): void {
+  db.prepare(
+    'UPDATE users SET email = NULL, email_verified = 0, password_hash = NULL WHERE id = ?',
+  ).run(userId)
+}
+
+export function unlinkIdentity(userId: string, provider: string): boolean {
+  const { changes } = db
+    .prepare('DELETE FROM identities WHERE user_id = ? AND provider = ?')
+    .run(userId, provider)
+  return Number(changes) > 0
+}
+
+/** Pemilik sebuah identitas penyedia, kalau ada — dipakai menolak rebutan. */
+export function ownerOfIdentity(provider: string, subject: string): string | null {
+  const row = db
+    .prepare('SELECT user_id FROM identities WHERE provider = ? AND subject = ?')
+    .get(provider, subject) as { user_id: string } | undefined
+  return row?.user_id ?? null
 }

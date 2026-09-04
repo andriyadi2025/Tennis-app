@@ -6,6 +6,8 @@ import { useAuthStore } from '@/store/auth'
 import { usePreferencesStore } from '@/store/preferences'
 
 import { LoginScreen } from '@/routes/LoginScreen'
+import { ForgotPasswordScreen } from '@/routes/ForgotPasswordScreen'
+import { AccountLinkScreen } from '@/routes/AccountLinkScreen'
 import { HomeScreen } from '@/routes/HomeScreen'
 import { SearchScreen } from '@/routes/SearchScreen'
 import { VenueDetailScreen } from '@/routes/VenueDetailScreen'
@@ -83,6 +85,7 @@ export function App() {
     <AndroidFrame>
       <Routes>
         <Route path="/login" element={<LoginScreen />} />
+        <Route path="/lupa-sandi" element={<ForgotPasswordScreen />} />
 
         <Route element={<RequireAuth />}>
           {/* Berbagi bottom nav */}
@@ -108,6 +111,7 @@ export function App() {
           <Route path="/chat/:id" element={<ChatScreen />} />
           <Route path="/sparring" element={<SparringScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="/akun/cara-masuk" element={<AccountLinkScreen />} />
 
           {/* Toko klub. Sengaja tidak jadi tab kelima: brief mematok empat
               tab, jadi pintu masuknya lewat Home dan Profil. */}

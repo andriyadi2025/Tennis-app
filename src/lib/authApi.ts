@@ -126,3 +126,72 @@ export function logout(token: string): Promise<{ ok: true }> {
 export function oauthUrl(provider: 'google' | 'facebook'): string {
   return `/api/auth/oauth/${provider}/start`
 }
+
+/* ── Lupa kata sandi ─────────────────────────────────────────────────────── */
+
+export interface ForgotResult {
+  ok: true
+  message: string
+  delivery?: 'smtp' | 'log'
+  /** Hanya di luar produksi — supaya alurnya bisa diselesaikan tanpa SMTP. */
+  devToken?: string
+}
+
+export function forgotPassword(email: string): Promise<ForgotResult> {
+  return post<ForgotResult>('/password/forgot', { email })
+}
+
+export function resetPassword(token: string, password: string): Promise<SignInResult> {
+  return post<SignInResult>('/password/reset', { token, password })
+}
+
+/* ── Menyambungkan cara masuk ────────────────────────────────────────────── */
+
+export type SignInMethod = 'phone' | 'email' | 'google' | 'facebook'
+
+export interface LinkState {
+  /** Cara masuk yang benar-benar bisa dipakai akun ini. */
+  methods: SignInMethod[]
+  user: AuthUser
+  identities: Identity[]
+  delivery?: 'smtp' | 'log'
+  devToken?: string
+}
+
+function del<T>(path: string, token: string): Promise<T> {
+  return call<T>(path, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+}
+
+export function fetchLinkState(token: string): Promise<LinkState> {
+  return call<LinkState>('/link', { headers: { Authorization: `Bearer ${token}` } })
+}
+
+export function requestLinkOtp(token: string, phone: string): Promise<OtpRequested> {
+  return post<OtpRequested>('/link/phone/request-otp', { phone }, token)
+}
+
+export function verifyLinkOtp(token: string, phone: string, code: string): Promise<LinkState> {
+  return post<LinkState>('/link/phone/verify', { phone, code }, token)
+}
+
+export function linkEmail(token: string, email: string, password?: string): Promise<LinkState> {
+  return post<LinkState>('/link/email', { email, password }, token)
+}
+
+/**
+ * Memulai OAuth untuk menyambung. Server mengembalikan URL alih-alih
+ * mengarahkan langsung: permintaan ini membawa header Authorization, dan
+ * redirect akan kehilangan header itu di perjalanan.
+ */
+export function startLinkOAuth(
+  token: string,
+  provider: 'google' | 'facebook',
+): Promise<{ url: string }> {
+  return call<{ url: string }>(`/link/${provider}/start`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+}
+
+export function unlinkMethod(token: string, method: SignInMethod): Promise<LinkState> {
+  return del<LinkState>(`/link/${method}`, token)
+}

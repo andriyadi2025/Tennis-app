@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { AtSign, Smartphone } from 'lucide-react'
 import type { SignInResult } from '@/lib/authApi'
@@ -429,6 +429,18 @@ function EmailStep({
       <Button type="submit" size="lg" block disabled={submitMutation.isPending}>
         {submitMutation.isPending ? 'Memproses…' : isRegister ? 'Daftar' : 'Masuk'}
       </Button>
+
+      {/* Hanya di mode masuk: orang yang sedang mendaftar belum punya sandi
+          untuk dilupakan, dan menawarkannya di sana justru membingungkan. */}
+      {!isRegister && (
+        <Link
+          to="/lupa-sandi"
+          className="min-h-touch py-2 text-center text-base font-semibold text-accent-700 underline"
+        >
+          Lupa kata sandi?
+        </Link>
+      )}
+
       <Button variant="ghost" block onClick={onBack}>
         Pakai cara lain
       </Button>
