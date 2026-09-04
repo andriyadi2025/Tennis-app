@@ -8,8 +8,17 @@ import type {
   ActivityTally,
   BookingPurpose,
   ClubSettings,
+  Complaint,
+  ComplaintDraft,
+  ComplaintStatus,
   Court,
   CourtDraft,
+  MerchCategory,
+  MerchItem,
+  MerchItemDraft,
+  MerchOrder,
+  MerchOrderStatus,
+  MerchPayMode,
   OpenMatch,
   PaymentMethod,
   Review,
@@ -49,6 +58,13 @@ export const queryKeys = {
   settings: ['club-settings'] as const,
   adminCourts: ['admin-courts'] as const,
   chat: (id: string) => ['chat', id] as const,
+  merch: (category: MerchCategory | null) => ['merch', category] as const,
+  merchItem: (id: string) => ['merch', 'item', id] as const,
+  merchOrders: ['merch-orders'] as const,
+  adminMerch: ['admin-merch'] as const,
+  adminMerchOrders: ['admin-merch-orders'] as const,
+  complaints: ['complaints'] as const,
+  complaint: (id: string) => ['complaint', id] as const,
 }
 
 export interface VenueSearchParams {
@@ -483,6 +499,173 @@ export function useSendMessage(chatId: string | undefined) {
     mutationFn: (body: string) => apiPost<ChatMessage>(`/api/chats/${chatId}/messages`, { body }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: queryKeys.chat(chatId ?? '') })
+    },
+  })
+}
+
+/* ── Toko merchandise ──────────────────────────────────────────────────── */
+
+export function useMerch(category: MerchCategory | null) {
+  return useQuery({
+    queryKey: queryKeys.merch(category),
+    queryFn: ({ signal }) => apiGet<MerchItem[]>(`/api/merch${qs({ category })}`, signal),
+  })
+}
+
+export function useMerchItem(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.merchItem(id ?? ''),
+    queryFn: ({ signal }) => apiGet<MerchItem>(`/api/merch/${id}`, signal),
+    enabled: Boolean(id),
+  })
+}
+
+export interface MerchOrderInput {
+  variantId: string
+  qty: number
+  payMode: MerchPayMode
+  paymentMethod?: PaymentMethod
+}
+
+/**
+ * Memesan mengubah tiga hal sekaligus: stok barang, saldo poin, dan daftar
+ * pesanan. Ketiganya dibatalkan cache-nya, kalau tidak layar akan memuji
+ * pesanan berhasil sambil tetap menampilkan stok dan poin yang lama.
+ */
+export function useOrderMerch(itemId: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: MerchOrderInput) =>
+      apiPost<MerchOrder>(`/api/merch/${itemId}/order`, input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['merch'] })
+      void client.invalidateQueries({ queryKey: queryKeys.merchOrders })
+      void client.invalidateQueries({ queryKey: queryKeys.me })
+    },
+  })
+}
+
+export function useMerchOrders() {
+  return useQuery({
+    queryKey: queryKeys.merchOrders,
+    queryFn: ({ signal }) => apiGet<MerchOrder[]>('/api/merch-orders', signal),
+  })
+}
+
+export function useCancelMerchOrder() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiPost<MerchOrder>(`/api/merch-orders/${id}/cancel`, {}),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['merch'] })
+      void client.invalidateQueries({ queryKey: queryKeys.merchOrders })
+      void client.invalidateQueries({ queryKey: queryKeys.me })
+    },
+  })
+}
+
+/* ── Toko: sisi admin ──────────────────────────────────────────────────── */
+
+export function useAdminMerch() {
+  return useQuery({
+    queryKey: queryKeys.adminMerch,
+    queryFn: ({ signal }) => apiGet<MerchItem[]>('/api/admin/merch', signal),
+  })
+}
+
+function invalidateMerch(client: ReturnType<typeof useQueryClient>) {
+  void client.invalidateQueries({ queryKey: queryKeys.adminMerch })
+  void client.invalidateQueries({ queryKey: ['merch'] })
+}
+
+export function useAddMerchItem() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (draft: MerchItemDraft) => apiPost<MerchItem[]>('/api/admin/merch', draft),
+    onSuccess: () => invalidateMerch(client),
+  })
+}
+
+export function useUpdateMerchItem() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, draft }: { id: string; draft: MerchItemDraft }) =>
+      apiPatch<MerchItem[]>(`/api/admin/merch/${id}`, draft),
+    onSuccess: () => invalidateMerch(client),
+  })
+}
+
+export function useAdminMerchOrders() {
+  return useQuery({
+    queryKey: queryKeys.adminMerchOrders,
+    queryFn: ({ signal }) => apiGet<MerchOrder[]>('/api/admin/merch-orders', signal),
+  })
+}
+
+export function useSetMerchOrderStatus() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: MerchOrderStatus }) =>
+      apiPatch<MerchOrder[]>(`/api/admin/merch-orders/${id}`, { status }),
+    onSuccess: (orders) => {
+      client.setQueryData(queryKeys.adminMerchOrders, orders)
+      void client.invalidateQueries({ queryKey: queryKeys.merchOrders })
+      // Membatalkan mengembalikan stok dan poin — keduanya jadi basi.
+      void client.invalidateQueries({ queryKey: ['merch'] })
+      void client.invalidateQueries({ queryKey: queryKeys.me })
+    },
+  })
+}
+
+/* ── Aduan & pesan ke admin ────────────────────────────────────────────── */
+
+export function useComplaints() {
+  return useQuery({
+    queryKey: queryKeys.complaints,
+    queryFn: ({ signal }) => apiGet<Complaint[]>('/api/complaints', signal),
+  })
+}
+
+export function useComplaint(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.complaint(id ?? ''),
+    queryFn: ({ signal }) => apiGet<Complaint>(`/api/complaints/${id}`, signal),
+    enabled: Boolean(id),
+  })
+}
+
+export function useCreateComplaint() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (draft: ComplaintDraft & { body: string }) =>
+      apiPost<Complaint>('/api/complaints', draft),
+    onSuccess: (complaint) => {
+      client.setQueryData(queryKeys.complaint(complaint.id), complaint)
+      void client.invalidateQueries({ queryKey: queryKeys.complaints })
+    },
+  })
+}
+
+/** Balasan dari sisi mana pun — server yang menentukan perannya. */
+export function useReplyComplaint(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: string) => apiPost<Complaint>(`/api/complaints/${id}/messages`, { body }),
+    onSuccess: (complaint) => {
+      client.setQueryData(queryKeys.complaint(complaint.id), complaint)
+      void client.invalidateQueries({ queryKey: queryKeys.complaints })
+    },
+  })
+}
+
+export function useSetComplaintStatus(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (status: ComplaintStatus) =>
+      apiPatch<Complaint>(`/api/complaints/${id}/status`, { status }),
+    onSuccess: (complaint) => {
+      client.setQueryData(queryKeys.complaint(complaint.id), complaint)
+      void client.invalidateQueries({ queryKey: queryKeys.complaints })
     },
   })
 }

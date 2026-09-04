@@ -1,7 +1,9 @@
 import type {
   AppNotification,
   ChatThread,
+  Complaint,
   Court,
+  MerchItem,
   OpenMatch,
   ClubSettings,
   Review,
@@ -862,6 +864,152 @@ export const CHATS: ChatThread[] = [
         authorName: 'Fajar',
         body: 'Aku ajak temen kantor ya, dia biasa main bek.',
         sentAt: hoursAgo(8),
+      },
+    ],
+  },
+]
+
+/* ── Toko merchandise ─────────────────────────────────────────────────────
+ * Katalog contoh klub tenis: apparel, perlengkapan, aksesori, konsumsi.
+ * Tiga cara jual sengaja diwakili — ada yang cuma dijual, ada yang cuma
+ * ditebus poin, ada yang keduanya — supaya semua jalur di layar terpakai.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export const MERCH_ITEMS: MerchItem[] = [
+  {
+    id: 'm-jersey',
+    name: 'Jersey latihan DBTC',
+    category: 'apparel',
+    description:
+      'Bahan dry-fit, logo bordir di dada kiri. Potongan reguler, dipakai tim klub saat latihan rutin.',
+    photo: { tone: 'accent', step: 300, seed: 12 },
+    priceIdr: 185_000,
+    pricePoints: 1_500,
+    variants: [
+      { id: 'm-jersey-s', label: 'S', stock: 6 },
+      { id: 'm-jersey-m', label: 'M', stock: 9 },
+      { id: 'm-jersey-l', label: 'L', stock: 4 },
+      { id: 'm-jersey-xl', label: 'XL', stock: 0 },
+    ],
+    membersOnly: false,
+    active: true,
+  },
+  {
+    id: 'm-polo',
+    name: 'Polo anggota DBTC',
+    category: 'apparel',
+    description:
+      'Polo katun pique dengan nomor anggota disulam di lengan. Hanya untuk anggota berbayar.',
+    photo: { tone: 'accent2', step: 300, seed: 21 },
+    priceIdr: 245_000,
+    pricePoints: 2_000,
+    variants: [
+      { id: 'm-polo-m', label: 'M', stock: 5 },
+      { id: 'm-polo-l', label: 'L', stock: 3 },
+    ],
+    membersOnly: true,
+    active: true,
+  },
+  {
+    id: 'm-grip',
+    name: 'Overgrip raket (isi 3)',
+    category: 'perlengkapan',
+    description: 'Overgrip tipis anti-selip, satu pak isi tiga. Warna dikirim acak sesuai stok.',
+    photo: { tone: 'neutral', step: 300, seed: 34 },
+    priceIdr: 65_000,
+    pricePoints: 550,
+    variants: [{ id: 'm-grip-1', label: 'Satu ukuran', stock: 24 }],
+    membersOnly: false,
+    active: true,
+  },
+  {
+    id: 'm-bola',
+    name: 'Bola tenis (tabung isi 3)',
+    category: 'perlengkapan',
+    description: 'Bola bertekanan untuk lapangan hard court. Tabung isi tiga.',
+    photo: { tone: 'accent', step: 200, seed: 45 },
+    priceIdr: 95_000,
+    pricePoints: null,
+    variants: [{ id: 'm-bola-1', label: 'Satu ukuran', stock: 30 }],
+    membersOnly: false,
+    active: true,
+  },
+  {
+    id: 'm-tumbler',
+    name: 'Tumbler DBTC 750 ml',
+    category: 'aksesori',
+    description: 'Tumbler stainless dobel dinding, logo klub dicetak laser. Hanya tukar poin.',
+    photo: { tone: 'accent2', step: 400, seed: 56 },
+    priceIdr: null,
+    pricePoints: 900,
+    variants: [{ id: 'm-tumbler-1', label: 'Satu ukuran', stock: 12 }],
+    membersOnly: false,
+    active: true,
+  },
+  {
+    id: 'm-handuk',
+    name: 'Handuk lapangan',
+    category: 'aksesori',
+    description: 'Handuk microfiber ukuran 40×90 cm dengan sablon logo.',
+    photo: { tone: 'neutral', step: 200, seed: 67 },
+    priceIdr: 75_000,
+    pricePoints: 650,
+    variants: [
+      { id: 'm-handuk-navy', label: 'Navy', stock: 8 },
+      { id: 'm-handuk-krem', label: 'Krem', stock: 2 },
+    ],
+    membersOnly: false,
+    active: true,
+  },
+  {
+    id: 'm-isotonik',
+    name: 'Minuman isotonik (1 dus)',
+    category: 'konsumsi',
+    description: 'Satu dus isi 24 botol, diambil langsung di kantin klub.',
+    photo: { tone: 'accent', step: 400, seed: 78 },
+    priceIdr: 120_000,
+    pricePoints: null,
+    variants: [{ id: 'm-isotonik-1', label: 'Satu dus', stock: 6 }],
+    membersOnly: false,
+    active: true,
+  },
+]
+
+/* ── Aduan contoh ─────────────────────────────────────────────────────────
+ * Satu aduan yang sudah dijawab klub, supaya utas percakapan punya isi sejak
+ * pertama dibuka dan bukan cuma layar kosong.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export const COMPLAINTS: Complaint[] = [
+  {
+    id: 'c-seed-1',
+    code: 'ADU-7K2M',
+    userId: CURRENT_USER.id,
+    userName: CURRENT_USER.name,
+    category: 'lapangan',
+    subject: 'Lampu Lap. 2 mati dua titik',
+    status: 'diproses',
+    createdAt: atHour(-3, 20),
+    updatedAt: atHour(-2, 9),
+    relatedKind: null,
+    relatedId: null,
+    relatedLabel: null,
+    messages: [
+      {
+        id: 'cm-seed-1',
+        complaintId: 'c-seed-1',
+        authorRole: 'member',
+        authorName: CURRENT_USER.name,
+        body: 'Main jam 8 malam kemarin, dua lampu di sisi utara Lap. 2 mati. Bola jadi susah dibaca kalau lob tinggi.',
+        sentAt: atHour(-3, 20),
+      },
+      {
+        id: 'cm-seed-2',
+        complaintId: 'c-seed-1',
+        authorRole: 'admin',
+        authorName: 'Admin DBTC',
+        body: 'Terima kasih laporannya. Sudah kami cek, ballast-nya rusak. Penggantian dijadwalkan Kamis pagi, jadi sesi malam Kamis sudah normal.',
+        sentAt: atHour(-2, 9),
       },
     ],
   },

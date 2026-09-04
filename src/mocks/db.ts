@@ -8,6 +8,9 @@ import type {
   Review,
   PrimeTime,
   Slot,
+  Complaint,
+  MerchItem,
+  MerchOrder,
   SparringInvite,
   Team,
   Tournament,
@@ -21,6 +24,8 @@ import {
   NOTIFICATIONS,
   OPEN_MATCHES,
   REVIEWS,
+  COMPLAINTS,
+  MERCH_ITEMS,
   SPARRING,
   TEAMS,
   TOURNAMENTS,
@@ -178,6 +183,10 @@ export const store = {
   notifications: [] as AppNotification[],
   chats: [] as ChatThread[],
   sparring: [] as SparringInvite[],
+  /** Katalog toko; stok berubah tiap pesanan masuk atau dibatalkan. */
+  merch: [] as MerchItem[],
+  /** Aduan beserta seluruh utas pesannya. */
+  complaints: [] as Complaint[],
   /** Pengaturan klub yang bisa diubah admin lewat dasbor. */
   settings: structuredClone(CLUB_SETTINGS),
   /*
@@ -232,6 +241,50 @@ export function findRegistration(tournamentId: string): TournamentRegistration |
   return [...registrations.values()].find((r) => r.tournamentId === tournamentId)
 }
 
+/* ── Toko ──────────────────────────────────────────────────────────────── */
+
+const merchOrders = new Map<string, MerchOrder>()
+
+export function findMerchItem(id: string): MerchItem | undefined {
+  return store.merch.find((m) => m.id === id)
+}
+
+/**
+ * Menyimpan barang yang stoknya berubah kembali ke katalog. Diganti utuh,
+ * bukan dimutasi di tempat, supaya salinan yang dipegang pemanggil tidak
+ * ikut berubah diam-diam.
+ */
+export function replaceMerchItem(item: MerchItem): void {
+  const index = store.merch.findIndex((m) => m.id === item.id)
+  if (index >= 0) store.merch[index] = item
+}
+
+export function saveMerchOrder(order: MerchOrder): void {
+  merchOrders.set(order.id, order)
+}
+
+export function getMerchOrder(id: string): MerchOrder | undefined {
+  return merchOrders.get(id)
+}
+
+export function listMerchOrders(): MerchOrder[] {
+  return [...merchOrders.values()].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
+
+/* ── Aduan ─────────────────────────────────────────────────────────────── */
+
+export function findComplaint(id: string): Complaint | undefined {
+  return store.complaints.find((c) => c.id === id)
+}
+
+export function saveComplaint(complaint: Complaint): void {
+  const index = store.complaints.findIndex((c) => c.id === complaint.id)
+  if (index >= 0) store.complaints[index] = complaint
+  else store.complaints.unshift(complaint)
+}
+
 export const membership = {
   hasJoinedTeam: (id: string) => joinedTeams.has(id),
   joinTeam: (id: string) => joinedTeams.add(id),
@@ -248,11 +301,14 @@ function loadCollections(): void {
   store.notifications = structuredClone(NOTIFICATIONS)
   store.chats = structuredClone(CHATS)
   store.sparring = structuredClone(SPARRING)
+  store.merch = structuredClone(MERCH_ITEMS)
+  store.complaints = structuredClone(COMPLAINTS)
   store.settings = structuredClone(CLUB_SETTINGS)
   store.profile = structuredClone(CURRENT_USER)
   joinedTeams.clear()
   registeredTournaments.clear()
   awardedActivities.clear()
+  merchOrders.clear()
 }
 
 /**
@@ -437,7 +493,7 @@ function seed(): void {
 
 const SNAPSHOT_KEY = 'mock-db'
 /** Naikkan kalau bentuk data berubah, supaya snapshot lama dibuang. */
-export const SNAPSHOT_VERSION = 3
+export const SNAPSHOT_VERSION = 4
 
 interface Snapshot {
   version: number
@@ -447,6 +503,7 @@ interface Snapshot {
   takenSlots: string[]
   bookings: Booking[]
   registrations: TournamentRegistration[]
+  merchOrders: MerchOrder[]
   joinedTeams: string[]
   registeredTournaments: string[]
   /** Pasangan [id, poin yang dikreditkan]. */
@@ -466,6 +523,7 @@ export function persistDb(): void {
     takenSlots: [...takenSlots],
     bookings: [...bookings.values()],
     registrations: [...registrations.values()],
+    merchOrders: [...merchOrders.values()],
     joinedTeams: [...joinedTeams],
     registeredTournaments: [...registeredTournaments],
     awardedActivities: [...awardedActivities],
@@ -485,6 +543,7 @@ function restoreDb(): boolean {
     snapshot.takenSlots.forEach((s) => takenSlots.add(s))
     snapshot.bookings.forEach((b) => bookings.set(b.id, b))
     snapshot.registrations.forEach((r) => registrations.set(r.id, r))
+    ;(snapshot.merchOrders ?? []).forEach((o) => merchOrders.set(o.id, o))
     snapshot.joinedTeams.forEach((t) => joinedTeams.add(t))
     snapshot.registeredTournaments.forEach((t) => registeredTournaments.add(t))
     // Bentuknya diperiksa, bukan dipercaya: snapshot versi lama menyimpan

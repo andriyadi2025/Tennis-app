@@ -5,9 +5,18 @@ import type {
   ChatMessage,
   BookingPurpose,
   ClubSettings,
+  Complaint,
+  ComplaintDraft,
+  ComplaintStatus,
   Court,
   CourtDraft,
+  MerchItem,
+  MerchItemDraft,
+  MerchOrder,
+  MerchOrderStatus,
+  MerchPayMode,
   PaymentMethod,
+  Role,
   Review,
   ReviewSummary,
   Slot,
@@ -16,6 +25,7 @@ import type {
   TournamentRegistration,
   Venue,
 } from '@/types'
+import { MERCH_STATUS_LABEL } from '@/types'
 import { computePrice } from '@/lib/pricing'
 import { tierFor } from '@/lib/points'
 import {
@@ -25,6 +35,8 @@ import {
   tallyActivities,
   totalActivityPoints,
 } from '@/lib/activities'
+import { decrementStock, findVariant, orderBlocker, quoteOrder, restoreStock } from '@/lib/merch'
+import { sortByActivity, statusAfterReply, validateDraft, validateReply } from '@/lib/complaints'
 import { toRange } from '@/lib/slots'
 import { addWeeks, parseISO } from '@/lib/dates'
 import {
@@ -36,6 +48,13 @@ import {
   findVenue,
   getBooking,
   awardedPoints,
+  findComplaint,
+  findMerchItem,
+  getMerchOrder,
+  listMerchOrders,
+  replaceMerchItem,
+  saveComplaint,
+  saveMerchOrder,
   isCursedSlot,
   isSlotAvailable,
   markAwarded,
@@ -47,6 +66,7 @@ import {
   recomputeVenueRating,
   saveBooking,
 } from './db'
+import { STORAGE_KEYS, readJson } from '@/lib/storage'
 import { CURRENT_USER } from './seed'
 
 /** Tim yang dianggap milik user; pengirim tiap ajakan sparring keluar. */
@@ -124,9 +144,28 @@ interface PayBody {
   method: PaymentMethod
 }
 
+/**
+ * Siapa yang sedang memanggil, menurut sesi auth yang sungguhan.
+ *
+ * Server tiruan ini dulu selalu membaca peran dari data seed, jadi pemanggil
+ * mana pun dianggap admin — dan sisi anggota dari fitur aduan tidak pernah
+ * benar-benar terpakai. Sesi auth adalah satu-satunya tempat yang tahu siapa
+ * yang sebenarnya masuk, jadi ia yang dibaca. Kalau belum ada sesi (mis. di
+ * tes yang menembak endpoint langsung), peran seed dipakai seperti dulu.
+ */
+function caller(): { id: string; name: string; role: Role } {
+  const session = readJson<{ user: { id: string; name: string; role: Role } | null } | null>(
+    STORAGE_KEYS.auth,
+    null,
+  )
+  const user = session?.user
+  if (!user) return { id: CURRENT_USER.id, name: store.profile.name, role: CURRENT_USER.role }
+  return { id: user.id, name: user.name, role: user.role }
+}
+
 /** Gerbang peran. Endpoint admin menolak siapa pun yang bukan admin. */
 function isAdmin(): boolean {
-  return CURRENT_USER.role === 'admin'
+  return caller().role === 'admin'
 }
 
 function forbidden() {
@@ -181,6 +220,113 @@ export function validateCourt(draft: CourtDraft, siblings: readonly Court[]): st
     return 'Tarif lapangan minimal Rp1.000 per jam.'
   }
   return null
+}
+
+/* ── Toko & aduan: penolong ────────────────────────────────────────────── */
+
+interface MerchOrderBody {
+  variantId: string
+  qty: number
+  payMode: MerchPayMode
+  paymentMethod?: PaymentMethod
+}
+
+/** Urutan status pesanan yang sah; juga dipakai memvalidasi kiriman admin. */
+export const MERCH_FLOW: readonly MerchOrderStatus[] = [
+  'menunggu',
+  'disiapkan',
+  'siapDiambil',
+  'selesai',
+  'batal',
+]
+
+export const COMPLAINT_FLOW: readonly ComplaintStatus[] = ['baru', 'diproses', 'selesai']
+
+function shortCode(prefix: string): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let out = `${prefix}-`
+  for (let i = 0; i < 4; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)]
+  }
+  return out
+}
+
+const merchCode = () => shortCode('TKO')
+const complaintCode = () => shortCode('ADU')
+
+/**
+ * Mengembalikan stok dan poin sebuah pesanan yang dibatalkan.
+ *
+ * Poin belanja yang sempat didapat ikut ditarik: kalau tidak, membeli lalu
+ * membatalkan jadi cara mencetak poin tanpa membayar apa pun.
+ */
+function refundMerchOrder(order: MerchOrder): void {
+  const item = findMerchItem(order.itemId)
+  if (item) replaceMerchItem(restoreStock(item, order.variantId, order.qty))
+  store.profile.points = Math.max(0, store.profile.points + order.pointsSpent - order.pointsEarned)
+  store.profile.tier = tierFor(store.profile.points)
+}
+
+/**
+ * Validasi barang toko. Sebuah barang harus punya setidaknya satu cara dibeli
+ * — tanpa harga rupiah maupun harga poin, ia cuma pajangan yang membingungkan.
+ */
+export function validateMerchDraft(draft: MerchItemDraft): string | null {
+  if (!draft.name.trim()) return 'Nama barang tidak boleh kosong.'
+  if (draft.priceIdr === null && draft.pricePoints === null) {
+    return 'Isi harga rupiah, harga poin, atau keduanya.'
+  }
+  if (draft.priceIdr !== null && draft.priceIdr < 1_000) {
+    return 'Harga rupiah minimal Rp1.000.'
+  }
+  if (draft.pricePoints !== null && draft.pricePoints < 1) {
+    return 'Harga poin minimal 1 poin.'
+  }
+  if (draft.variants.length === 0) return 'Tambahkan minimal satu varian atau ukuran.'
+  const labels = draft.variants.map((v) => v.label.trim().toLowerCase())
+  if (labels.some((l) => !l)) return 'Nama varian tidak boleh kosong.'
+  if (new Set(labels).size !== labels.length) return 'Nama varian tidak boleh kembar.'
+  if (draft.variants.some((v) => !Number.isInteger(v.stock) || v.stock < 0)) {
+    return 'Stok harus bilangan bulat 0 atau lebih.'
+  }
+  return null
+}
+
+/** Barang baru mendapat blok warna yang stabil, diturunkan dari idnya. */
+function itemFromDraft(draft: MerchItemDraft, id: string): MerchItem {
+  const tones = ['accent', 'accent2', 'neutral'] as const
+  const seed = id.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0)
+  return {
+    id,
+    name: draft.name.trim(),
+    category: draft.category,
+    description: draft.description.trim(),
+    photo: { tone: tones[seed % 3] ?? 'accent', step: 300, seed },
+    priceIdr: draft.priceIdr,
+    pricePoints: draft.pricePoints,
+    variants: draft.variants.map((v, i) => ({
+      id: `${id}-v${i}`,
+      label: v.label.trim(),
+      stock: v.stock,
+    })),
+    membersOnly: draft.membersOnly,
+    active: draft.active,
+  }
+}
+
+/**
+ * Nama yang enak dibaca untuk booking atau pesanan yang diadukan. Kalau
+ * rujukannya sudah tidak ada, aduan tetap dibuat tanpa label — kehilangan
+ * konteks lebih baik daripada kehilangan aduannya.
+ */
+function labelForRelated(kind: Complaint['relatedKind'], id: string | null): string | null {
+  if (!kind || !id) return null
+  if (kind === 'booking') {
+    const booking = getBooking(id)
+    return booking ? `${booking.venueName} · ${booking.code}` : null
+  }
+  const order = getMerchOrder(id)
+  return order ? `${order.itemName} · ${order.code}` : null
 }
 
 export const ADD_ONS = [
@@ -931,6 +1077,347 @@ export const handlers = [
     applySettingsToVenue()
     persistDb()
     return HttpResponse.json(venue.courts)
+  }),
+
+  /* ── Toko merchandise ──────────────────────────────────────────────────
+   * Katalog, pemesanan, dan riwayat. Aturannya dipanggil dari `lib/merch`,
+   * bukan ditulis ulang di sini: penjaga yang ditulis dua kali akan menyimpang
+   * dari yang dipakai layar, dan yang menyimpang biasanya yang di server.
+   * ──────────────────────────────────────────────────────────────────── */
+
+  http.get('/api/merch', async ({ request }) => {
+    await latency()
+    const category = new URL(request.url).searchParams.get('category')
+    const rows = store.merch
+      .filter((m) => m.active)
+      .filter((m) => (category ? m.category === category : true))
+    return HttpResponse.json(rows)
+  }),
+
+  http.get('/api/merch/:id', async ({ params }) => {
+    await latency()
+    const item = findMerchItem(String(params.id))
+    // Barang nonaktif tetap bisa dibuka lewat tautan dari riwayat pesanan.
+    if (!item) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Barang tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    return HttpResponse.json(item)
+  }),
+
+  /**
+   * Memesan. Stok dipotong dan poin dipindahkan sekaligus — pemeriksaannya
+   * dilakukan lebih dulu, jadi tidak ada keadaan setengah jadi kalau ditolak.
+   */
+  http.post('/api/merch/:id/order', async ({ params, request }) => {
+    await latency()
+    const item = findMerchItem(String(params.id))
+    if (!item) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Barang tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+
+    const body = (await request.json()) as MerchOrderBody
+    const blocker = orderBlocker({
+      item,
+      variantId: body.variantId,
+      qty: body.qty,
+      payMode: body.payMode,
+      user: store.profile,
+    })
+    if (blocker) {
+      // 409, bukan 400: yang salah bukan bentuk permintaannya melainkan
+      // keadaan saat ini — stok habis, poin kurang, bukan anggota.
+      return HttpResponse.json({ code: 'ORDER_BLOCKED', message: blocker }, { status: 409 })
+    }
+
+    const variant = findVariant(item, body.variantId)
+    if (!variant) {
+      return HttpResponse.json(
+        { code: 'ORDER_BLOCKED', message: 'Varian tidak ditemukan.' },
+        { status: 409 },
+      )
+    }
+    const quote = quoteOrder(item, body.qty, body.payMode)
+
+    const order: MerchOrder = {
+      id: `mo-${Date.now().toString(36)}`,
+      code: merchCode(),
+      itemId: item.id,
+      itemName: item.name,
+      variantId: variant.id,
+      variantLabel: variant.label,
+      qty: quote.qty,
+      payMode: quote.payMode,
+      paymentMethod: quote.payMode === 'uang' ? (body.paymentMethod ?? 'qris') : null,
+      totalIdr: quote.totalIdr,
+      pointsSpent: quote.pointsSpent,
+      pointsEarned: quote.pointsEarned,
+      status: 'menunggu',
+      createdAt: new Date().toISOString(),
+    }
+
+    replaceMerchItem(decrementStock(item, variant.id, quote.qty))
+    saveMerchOrder(order)
+
+    store.profile.points = Math.max(
+      0,
+      store.profile.points - quote.pointsSpent + quote.pointsEarned,
+    )
+    store.profile.tier = tierFor(store.profile.points)
+    persistDb()
+
+    return HttpResponse.json(order, { status: 201 })
+  }),
+
+  http.get('/api/merch-orders', async () => {
+    await latency()
+    return HttpResponse.json(listMerchOrders())
+  }),
+
+  /**
+   * Membatalkan pesanan sendiri, selama klub belum menyiapkannya. Stok dan
+   * poin dikembalikan — tanpa itu tiap pembatalan diam-diam menghanguskan
+   * barang dan saldo sekaligus.
+   */
+  http.post('/api/merch-orders/:id/cancel', async ({ params }) => {
+    await latency()
+    const order = getMerchOrder(String(params.id))
+    if (!order) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Pesanan tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    if (order.status !== 'menunggu') {
+      return HttpResponse.json(
+        {
+          code: 'TOO_LATE',
+          message: `Pesanan sudah ${MERCH_STATUS_LABEL[order.status].toLowerCase()} — hubungi klub lewat menu Bantuan.`,
+        },
+        { status: 409 },
+      )
+    }
+
+    const cancelled: MerchOrder = { ...order, status: 'batal' }
+    saveMerchOrder(cancelled)
+    refundMerchOrder(order)
+    persistDb()
+    return HttpResponse.json(cancelled)
+  }),
+
+  /* ── Toko: sisi admin ──────────────────────────────────────────────── */
+
+  http.get('/api/admin/merch', async () => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    // Termasuk yang nonaktif — admin perlu melihat apa yang ia sembunyikan.
+    return HttpResponse.json(store.merch)
+  }),
+
+  http.post('/api/admin/merch', async ({ request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const draft = (await request.json()) as MerchItemDraft
+    const invalid = validateMerchDraft(draft)
+    if (invalid) {
+      return HttpResponse.json({ code: 'INVALID', message: invalid }, { status: 400 })
+    }
+    store.merch.push(itemFromDraft(draft, `m-${Date.now().toString(36)}`))
+    persistDb()
+    return HttpResponse.json(store.merch, { status: 201 })
+  }),
+
+  http.patch('/api/admin/merch/:id', async ({ params, request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const existing = findMerchItem(String(params.id))
+    if (!existing) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Barang tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    const draft = (await request.json()) as MerchItemDraft
+    const invalid = validateMerchDraft(draft)
+    if (invalid) {
+      return HttpResponse.json({ code: 'INVALID', message: invalid }, { status: 400 })
+    }
+    // Foto dan id dipertahankan: mengubah harga tidak boleh mengganti gambar.
+    replaceMerchItem({ ...itemFromDraft(draft, existing.id), photo: existing.photo })
+    persistDb()
+    return HttpResponse.json(store.merch)
+  }),
+
+  http.get('/api/admin/merch-orders', async () => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    return HttpResponse.json(listMerchOrders())
+  }),
+
+  http.patch('/api/admin/merch-orders/:id', async ({ params, request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const order = getMerchOrder(String(params.id))
+    if (!order) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Pesanan tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    const { status } = (await request.json()) as { status: MerchOrderStatus }
+    if (!MERCH_FLOW.includes(status)) {
+      return HttpResponse.json(
+        { code: 'INVALID', message: 'Status tidak dikenal.' },
+        { status: 400 },
+      )
+    }
+
+    saveMerchOrder({ ...order, status })
+    // Pembatalan oleh klub mengembalikan stok dan poin, sama seperti oleh user.
+    if (status === 'batal' && order.status !== 'batal') refundMerchOrder(order)
+    persistDb()
+    return HttpResponse.json(listMerchOrders())
+  }),
+
+  /* ── Aduan & pesan ke admin ────────────────────────────────────────────
+   * Satu utas dipakai bersama anggota dan admin. Statusnya mengikuti
+   * percakapannya (lihat `lib/complaints`), bukan tombol terpisah.
+   * ──────────────────────────────────────────────────────────────────── */
+
+  http.get('/api/complaints', async () => {
+    await latency()
+    // Anggota hanya melihat aduannya sendiri; admin melihat semuanya.
+    const rows = isAdmin()
+      ? store.complaints
+      : store.complaints.filter((c) => c.userId === caller().id)
+    return HttpResponse.json(sortByActivity(rows))
+  }),
+
+  http.get('/api/complaints/:id', async ({ params }) => {
+    await latency()
+    const complaint = findComplaint(String(params.id))
+    if (!complaint) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Aduan tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    if (!isAdmin() && complaint.userId !== caller().id) return forbidden()
+    return HttpResponse.json(complaint)
+  }),
+
+  http.post('/api/complaints', async ({ request }) => {
+    await latency()
+    const draft = (await request.json()) as ComplaintDraft & { body: string }
+    const invalid = validateDraft({ subject: draft.subject, body: draft.body })
+    if (invalid) {
+      return HttpResponse.json({ code: 'INVALID', message: invalid }, { status: 400 })
+    }
+
+    const now = new Date().toISOString()
+    const id = `c-${Date.now().toString(36)}`
+    // Satu kali baca: kepala aduan dan pesan pembukanya harus menyebut orang
+    // yang sama, kalau tidak utasnya tampak ditulis dua orang berbeda.
+    const me = caller()
+    const complaint: Complaint = {
+      id,
+      code: complaintCode(),
+      userId: me.id,
+      userName: me.name,
+      category: draft.category,
+      subject: draft.subject.trim(),
+      status: 'baru',
+      createdAt: now,
+      updatedAt: now,
+      relatedKind: draft.relatedKind,
+      relatedId: draft.relatedId,
+      relatedLabel: labelForRelated(draft.relatedKind, draft.relatedId),
+      messages: [
+        {
+          id: `cm-${Date.now().toString(36)}`,
+          complaintId: id,
+          authorRole: 'member',
+          authorName: me.name,
+          body: draft.body.trim(),
+          sentAt: now,
+        },
+      ],
+    }
+    saveComplaint(complaint)
+    persistDb()
+    return HttpResponse.json(complaint, { status: 201 })
+  }),
+
+  http.post('/api/complaints/:id/messages', async ({ params, request }) => {
+    await latency()
+    const complaint = findComplaint(String(params.id))
+    if (!complaint) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Aduan tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    if (!isAdmin() && complaint.userId !== caller().id) return forbidden()
+
+    const { body } = (await request.json()) as { body: string }
+    const invalid = validateReply(body)
+    if (invalid) {
+      return HttpResponse.json({ code: 'INVALID', message: invalid }, { status: 400 })
+    }
+
+    const me = caller()
+    const role: Role = me.role
+    const now = new Date().toISOString()
+    const updated: Complaint = {
+      ...complaint,
+      // Status ikut percakapan: balasan klub memindahkannya dari "baru", dan
+      // anggota yang menulis lagi membuka kembali yang sudah ditutup.
+      status: statusAfterReply(complaint.status, role),
+      updatedAt: now,
+      messages: [
+        ...complaint.messages,
+        {
+          id: `cm-${Date.now().toString(36)}`,
+          complaintId: complaint.id,
+          authorRole: role,
+          authorName: role === 'admin' ? 'Admin DBTC' : me.name,
+          body: body.trim(),
+          sentAt: now,
+        },
+      ],
+    }
+    saveComplaint(updated)
+    persistDb()
+    return HttpResponse.json(updated)
+  }),
+
+  /** Menutup atau membuka kembali aduan — hanya admin. */
+  http.patch('/api/complaints/:id/status', async ({ params, request }) => {
+    await latency()
+    if (!isAdmin()) return forbidden()
+    const complaint = findComplaint(String(params.id))
+    if (!complaint) {
+      return HttpResponse.json(
+        { code: 'NOT_FOUND', message: 'Aduan tidak ditemukan.' },
+        { status: 404 },
+      )
+    }
+    const { status } = (await request.json()) as { status: ComplaintStatus }
+    if (!COMPLAINT_FLOW.includes(status)) {
+      return HttpResponse.json(
+        { code: 'INVALID', message: 'Status tidak dikenal.' },
+        { status: 400 },
+      )
+    }
+    const updated: Complaint = { ...complaint, status, updatedAt: new Date().toISOString() }
+    saveComplaint(updated)
+    persistDb()
+    return HttpResponse.json(updated)
   }),
 
   /** Dipakai UI untuk tahu apa yang sudah diikuti user tanpa menebak. */

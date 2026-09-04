@@ -468,3 +468,165 @@ export interface ChatThread {
   bookingId: string | null
   messages: ChatMessage[]
 }
+
+/* ── Toko merchandise ─────────────────────────────────────────────────────
+ * Barang klub bisa dibeli dengan uang, ditukar dengan poin, atau keduanya —
+ * admin yang menentukan per barang. Harga poin **tidak** diturunkan dari
+ * harga rupiah: kaus Rp250.000 boleh saja ditebus 1.500 poin kalau klub mau
+ * memurahkannya untuk anggota setia. Menurunkannya otomatis akan memaksa
+ * satu kurs untuk seluruh katalog.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export type MerchCategory = 'apparel' | 'perlengkapan' | 'aksesori' | 'konsumsi'
+
+export const MERCH_CATEGORY_LABEL: Record<MerchCategory, string> = {
+  apparel: 'Apparel',
+  perlengkapan: 'Perlengkapan',
+  aksesori: 'Aksesori',
+  konsumsi: 'Konsumsi',
+}
+
+/**
+ * Ukuran atau warna. Stok tinggal di sini, bukan juga di barang: dua tempat
+ * menyimpan stok akan menyimpang begitu satu varian terjual.
+ */
+export interface MerchVariant {
+  id: string
+  /** "M", "Merah", atau "Satu ukuran" untuk barang tanpa pilihan. */
+  label: string
+  stock: number
+}
+
+export interface MerchItem {
+  id: string
+  name: string
+  category: MerchCategory
+  description: string
+  photo: PhotoBlock
+  /** Harga rupiah; null berarti hanya bisa ditukar poin. */
+  priceIdr: number | null
+  /** Harga poin; null berarti hanya bisa dibeli dengan uang. */
+  pricePoints: number | null
+  variants: MerchVariant[]
+  /** Sebagian barang hanya untuk anggota berbayar. */
+  membersOnly: boolean
+  /** Barang nonaktif hilang dari katalog tapi riwayat pesanannya tetap ada. */
+  active: boolean
+}
+
+/** Barang seperti yang diisi admin — belum punya id sampai disimpan. */
+export interface MerchItemDraft {
+  name: string
+  category: MerchCategory
+  description: string
+  priceIdr: number | null
+  pricePoints: number | null
+  variants: { label: string; stock: number }[]
+  membersOnly: boolean
+  active: boolean
+}
+
+/** Dibayar uang, atau ditebus poin. Bukan campuran keduanya. */
+export type MerchPayMode = 'uang' | 'poin'
+
+export const MERCH_PAY_LABEL: Record<MerchPayMode, string> = {
+  uang: 'Bayar',
+  poin: 'Tukar poin',
+}
+
+export type MerchOrderStatus = 'menunggu' | 'disiapkan' | 'siapDiambil' | 'selesai' | 'batal'
+
+export const MERCH_STATUS_LABEL: Record<MerchOrderStatus, string> = {
+  menunggu: 'Menunggu konfirmasi',
+  disiapkan: 'Disiapkan',
+  siapDiambil: 'Siap diambil',
+  selesai: 'Selesai',
+  batal: 'Dibatalkan',
+}
+
+export interface MerchOrder {
+  id: string
+  /** Kode ambil, ditunjukkan ke petugas klub. */
+  code: string
+  itemId: string
+  /** Nama dan varian disalin: barang boleh berubah nama, pesanan lama tidak. */
+  itemName: string
+  variantId: string
+  variantLabel: string
+  qty: number
+  payMode: MerchPayMode
+  /** Terisi hanya kalau payMode `uang`. */
+  paymentMethod: PaymentMethod | null
+  /** Total rupiah; 0 kalau ditebus poin. */
+  totalIdr: number
+  /** Poin yang dipotong; 0 kalau dibayar uang. */
+  pointsSpent: number
+  /** Poin belanja yang didapat; 0 kalau ditebus poin. */
+  pointsEarned: number
+  status: MerchOrderStatus
+  createdAt: string
+}
+
+/* ── Aduan & pesan ke admin ───────────────────────────────────────────────
+ * Satu utas dipakai bersama: anggota menulis, admin membalas di utas yang
+ * sama. Tidak ada kotak masuk terpisah — dua salinan percakapan yang sama
+ * adalah cara tercepat membuat jawaban admin tidak pernah sampai.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export type ComplaintCategory =
+  'lapangan' | 'kebersihan' | 'pembayaran' | 'pelayanan' | 'toko' | 'lainnya'
+
+export const COMPLAINT_CATEGORY_LABEL: Record<ComplaintCategory, string> = {
+  lapangan: 'Kondisi lapangan',
+  kebersihan: 'Kebersihan & fasilitas',
+  pembayaran: 'Pembayaran & poin',
+  pelayanan: 'Pelayanan petugas',
+  toko: 'Pesanan toko',
+  lainnya: 'Lainnya',
+}
+
+/** `baru` belum dijawab siapa pun; `selesai` bisa terbuka lagi kalau dibalas. */
+export type ComplaintStatus = 'baru' | 'diproses' | 'selesai'
+
+export const COMPLAINT_STATUS_LABEL: Record<ComplaintStatus, string> = {
+  baru: 'Baru',
+  diproses: 'Diproses',
+  selesai: 'Selesai',
+}
+
+export interface ComplaintMessage {
+  id: string
+  complaintId: string
+  /** Peran penulis, bukan idnya — yang dilihat pembaca adalah "kamu" vs "klub". */
+  authorRole: Role
+  authorName: string
+  body: string
+  sentAt: string
+}
+
+export interface Complaint {
+  id: string
+  /** Kode aduan yang bisa disebut anggota saat menanyakan kabarnya. */
+  code: string
+  userId: string
+  userName: string
+  category: ComplaintCategory
+  subject: string
+  status: ComplaintStatus
+  createdAt: string
+  /** Waktu pesan terakhir — dasar urutan daftar. */
+  updatedAt: string
+  /** Booking atau pesanan toko yang diadukan, kalau ada. */
+  relatedKind: 'booking' | 'merchOrder' | null
+  relatedId: string | null
+  relatedLabel: string | null
+  messages: ComplaintMessage[]
+}
+
+export interface ComplaintDraft {
+  category: ComplaintCategory
+  subject: string
+  body: string
+  relatedKind: 'booking' | 'merchOrder' | null
+  relatedId: string | null
+}
