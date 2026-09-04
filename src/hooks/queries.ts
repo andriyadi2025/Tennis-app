@@ -67,6 +67,8 @@ export const queryKeys = {
   complaints: ['complaints'] as const,
   complaint: (id: string) => ['complaint', id] as const,
   proposals: (id: string) => ['sparring', id, 'proposals'] as const,
+  payment: (id: string) => ['payment', id] as const,
+  dues: ['dues'] as const,
 }
 
 export interface VenueSearchParams {
@@ -225,17 +227,106 @@ export function useBooking(id: string | undefined) {
   })
 }
 
+export interface Payment {
+  id: string
+  kind: 'booking' | 'merch' | 'dues'
+  refId: string
+  amountIdr: number
+  method: string
+  status: 'pending' | 'settled' | 'expired' | 'failed'
+  /** `simulator` berarti tidak ada gerbang sungguhan di baliknya. */
+  provider: string
+  redirectUrl: string | null
+  qrString: string | null
+  expiresAt: string
+  settledAt: string | null
+  createdAt: string
+}
+
+/**
+ * Menekan Bayar **membuat tagihan**, bukan mengonfirmasi booking.
+ *
+ * Yang mengonfirmasi adalah webhook penyedia setelah uangnya masuk. Klien
+ * yang kembali dari halaman pembayaran tidak membuktikan apa pun — halaman
+ * itu bisa dibuka siapa saja.
+ */
 export function usePayBooking() {
-  const client = useQueryClient()
   return useMutation({
     mutationFn: ({ id, method }: { id: string; method: PaymentMethod }) =>
-      apiPost<Booking>(`/api/bookings/${id}/pay`, { method }),
-    onSuccess: (booking) => {
-      client.setQueryData(queryKeys.booking(booking.id), booking)
+      apiPost<{ booking: Booking; payment: Payment | null }>(`/api/bookings/${id}/pay`, { method }),
+  })
+}
+
+export function usePayment(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.payment(id ?? ''),
+    queryFn: ({ signal }) => apiGet<Payment>(`/api/payments/${id}`, signal),
+    enabled: Boolean(id),
+  })
+}
+
+/** Membuat tagihan untuk pesanan toko atau iuran. */
+export function useCreatePayment() {
+  return useMutation({
+    mutationFn: (input: { kind: Payment['kind']; refId: string; method: string }) =>
+      apiPost<Payment>('/api/payments', input),
+  })
+}
+
+/**
+ * Menandai tagihan lunas lewat simulator.
+ *
+ * Hanya ada saat penyedia sungguhan belum dikonfigurasi. Jalurnya tetap jalur
+ * produksi — server merakit webhook bertanda tangan dan mengirimkannya ke
+ * endpoint yang sama.
+ */
+export function useSimulatePayment(id: string | undefined) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (status: Payment['status'] = 'settled') =>
+      apiPost<Payment>(`/api/payments/${id}/simulate`, { status }),
+    onSuccess: (payment) => {
+      client.setQueryData(queryKeys.payment(payment.id), payment)
       void client.invalidateQueries({ queryKey: queryKeys.bookings })
+      void client.invalidateQueries({ queryKey: queryKeys.merchOrders })
+      void client.invalidateQueries({ queryKey: queryKeys.me })
+      void client.invalidateQueries({ queryKey: queryKeys.dues })
       void client.invalidateQueries({ queryKey: queryKeys.activities })
-      // Slot yang baru dikunci membuat semua grid slot basi.
       void client.invalidateQueries({ queryKey: ['venue'] })
+    },
+  })
+}
+
+/* ── Iuran keanggotaan ─────────────────────────────────────────────────── */
+
+export interface DuesInvoice {
+  id: string
+  period: string
+  amountIdr: number
+  status: 'menunggu' | 'lunas'
+  dueAt: string
+  paidAt: string | null
+}
+
+export interface DuesState {
+  duesMonthlyIdr: number
+  memberDiscount: number
+  invoices: DuesInvoice[]
+}
+
+export function useDues() {
+  return useQuery({
+    queryKey: queryKeys.dues,
+    queryFn: ({ signal }) => apiGet<DuesState>('/api/dues', signal),
+  })
+}
+
+export function useCreateDuesInvoice() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiPost<DuesInvoice>('/api/dues/invoice', {}),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.dues })
     },
   })
 }

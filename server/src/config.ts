@@ -78,6 +78,16 @@ export const config = {
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean),
 
+  /*
+   * Midtrans. Tanpa kunci ini, pembayaran memakai simulator yang menyebut
+   * dirinya simulator — bukan berpura-pura menerima uang.
+   */
+  midtrans: {
+    serverKey: env('MIDTRANS_SERVER_KEY'),
+    clientKey: env('MIDTRANS_CLIENT_KEY'),
+    production: env('MIDTRANS_PRODUCTION') === 'true',
+  },
+
   google: oauth('GOOGLE'),
   facebook: oauth('FACEBOOK'),
 
@@ -97,6 +107,10 @@ export const config = {
   },
 } as const
 
+export function paymentsConfigured(): boolean {
+  return Boolean(config.midtrans.serverKey && config.midtrans.clientKey)
+}
+
 export function smsConfigured(): boolean {
   return Boolean(config.sms.accountSid && config.sms.authToken && config.sms.from)
 }
@@ -113,6 +127,7 @@ export function providerStatus() {
     google: config.google !== null,
     facebook: config.facebook !== null,
     smsDelivery: smsConfigured() ? 'twilio' : 'log',
+    payments: paymentsConfigured() ? 'midtrans' : 'simulator',
     emailDelivery: smtpConfigured() ? 'smtp' : 'log',
   } as const
 }
@@ -184,6 +199,17 @@ export function readiness(): ReadinessIssue[] {
   }
   if (!smtpConfigured()) {
     warn('SMTP_*', 'Email verifikasi dan atur ulang sandi dicetak ke log, bukan dikirim.')
+  }
+  if (!paymentsConfigured()) {
+    /*
+     * Fatal di produksi, bukan sekadar peringatan: app yang menerima pesanan
+     * dan mengaku lunas tanpa gerbang pembayaran mengambil barang orang tanpa
+     * uang berpindah. Itu bukan kekurangan fitur, itu salah.
+     */
+    fatal(
+      'MIDTRANS_*',
+      'Belum ada gerbang pembayaran. Pembayaran akan memakai simulator, yang tidak menerima uang sungguhan.',
+    )
   }
   if (config.appOrigin.startsWith('http://') && !config.appOrigin.includes('localhost')) {
     fatal('APP_ORIGIN', 'Bukan HTTPS. Token sesi akan melintas dalam bentuk terbaca.')

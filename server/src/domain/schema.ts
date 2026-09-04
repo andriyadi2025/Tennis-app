@@ -271,6 +271,55 @@ const TABLES = `
     sent_at      TEXT NOT NULL
   );
 
+  -- Pembayaran
+  -- Satu baris per tagihan, apa pun yang dibayar. Jumlahnya disimpan di sini
+  -- dan dicocokkan lagi saat webhook datang: penyedia yang melaporkan angka
+  -- berbeda dari yang ditagihkan berarti ada yang tidak beres, dan itu tidak
+  -- boleh diam-diam diterima.
+  CREATE TABLE IF NOT EXISTS payments (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    -- 'booking', 'merch', atau 'dues'.
+    kind         TEXT NOT NULL,
+    ref_id       TEXT NOT NULL,
+    amount_idr   INTEGER NOT NULL,
+    method       TEXT NOT NULL,
+    provider     TEXT NOT NULL,
+    provider_ref TEXT,
+    status       TEXT NOT NULL,
+    redirect_url TEXT,
+    qr_string    TEXT,
+    expires_at   TEXT NOT NULL,
+    settled_at   TEXT,
+    created_at   TEXT NOT NULL
+  );
+
+  -- Webhook yang sudah diproses. Penyedia mengirim ulang saat ragu, dan
+  -- memproses ulang berarti mengkreditkan poin dua kali untuk satu pembayaran.
+  CREATE TABLE IF NOT EXISTS payment_events (
+    id         TEXT PRIMARY KEY,
+    payment_id TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    raw        TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  -- Iuran keanggotaan
+  -- Tagihan per periode. Satu baris per bulan per anggota, jadi menagih dua
+  -- kali untuk bulan yang sama ditolak batasan unik, bukan oleh kehati-hatian.
+  CREATE TABLE IF NOT EXISTS dues_invoices (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    -- Periode dalam bentuk YYYY-MM; mengurut sama secara teks dan kronologis.
+    period      TEXT NOT NULL,
+    amount_idr  INTEGER NOT NULL,
+    status      TEXT NOT NULL,
+    due_at      TEXT NOT NULL,
+    paid_at     TEXT,
+    created_at  TEXT NOT NULL,
+    UNIQUE (user_id, period)
+  );
+
   -- Poin partisipasi yang sudah dikreditkan
   -- Jumlahnya ikut disimpan, bukan cuma idnya: kalau admin menurunkan poin
   -- Lomba, riwayat lama tetap harus menulis angka yang dulu masuk ke saldo.
@@ -283,6 +332,9 @@ const TABLES = `
     PRIMARY KEY (user_id, activity_id)
   );
 
+  CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(kind, ref_id);
+  CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_dues_user ON dues_invoices(user_id, period);
   CREATE INDEX IF NOT EXISTS idx_bookings_user ON bookings(user_id, starts_at);
   CREATE INDEX IF NOT EXISTS idx_reviews_venue ON reviews(venue_id);
   CREATE INDEX IF NOT EXISTS idx_chat_messages ON chat_messages(chat_id, sent_at);
@@ -295,6 +347,9 @@ const TABLES = `
 `
 
 export const DOMAIN_TABLES = [
+  'payment_events',
+  'payments',
+  'dues_invoices',
   'taken_slots',
   'bookings',
   'reviews',

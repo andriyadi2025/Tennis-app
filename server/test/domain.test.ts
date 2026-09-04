@@ -116,6 +116,20 @@ describe('booking', () => {
     return { venueId: venue.id, courtId: venue.courts[0]!.id }
   }
 
+  /**
+   * Membayar sampai lunas.
+   *
+   * Menekan Bayar sekarang cuma membuat tagihan; yang mengonfirmasi booking
+   * adalah webhook penyedia. Simulator merakit webhook bertanda tangan dan
+   * mengirimkannya ke endpoint yang sama dengan yang dipakai produksi.
+   */
+  async function payInFull(bookingId: string, token: string) {
+    const charged = await post(`/api/bookings/${bookingId}/pay`, { method: 'qris' }, token)
+    if (charged.status !== 201) return charged
+    const payment = charged.body.payment as Body
+    return post(`/api/payments/${payment.id}/simulate`, { status: 'settled' }, token)
+  }
+
   /** Jam kosong berikutnya di lapangan itu, diambil dari grid server. */
   async function freeSlot(token: string, venueId: string, courtId: string) {
     const besok = new Date()
@@ -191,9 +205,10 @@ describe('booking', () => {
       },
       raka,
     )
-    const paid = await post(`/api/bookings/${first.body.id}/pay`, { method: 'qris' }, raka)
+    const paid = await payInFull(String(first.body.id), raka)
     expect(paid.status).toBe(200)
-    expect(paid.body.status).toBe('confirmed')
+    expect(paid.body.status).toBe('settled')
+    expect((await get(`/api/bookings/${first.body.id}`, raka)).body.status).toBe('confirmed')
 
     // Orang lain, jam yang sama: inilah yang tidak pernah bisa terjadi
     // selama domainnya hidup di dalam browser satu orang.
@@ -256,7 +271,7 @@ describe('booking', () => {
     // Booking yang tidak jadi tidak boleh menghasilkan poin.
     expect((await get('/api/me', token)).body.points).toBe(0)
 
-    await post(`/api/bookings/${created.body.id}/pay`, { method: 'qris' }, token)
+    await payInFull(String(created.body.id), token)
     expect(Number((await get('/api/me', token)).body.points)).toBeGreaterThan(0)
   })
 })

@@ -6,6 +6,9 @@ import * as store from './store.ts'
 import type { DomainUser } from './store.ts'
 import { buildSlots, hoursOf } from './slots.ts'
 import { heartbeat, openStream, publish, subscribe } from './events.ts'
+import { createCharge, findPayment, listPayments, paymentView, applyWebhook } from './payments.ts'
+import { paymentProvider, SimulatorProvider } from '../payments/index.ts'
+import type { PaymentKind, PaymentStatus } from '../payments/index.ts'
 import type {
   AppNotification,
   Booking,
@@ -31,7 +34,7 @@ import type {
 import { computePrice } from '../../../shared/pricing.ts'
 import { toRange } from '../../../shared/slots.ts'
 import { addWeeks, parseISO } from '../../../shared/dates.ts'
-import { pointsEarned, tierFor } from '../../../shared/points.ts'
+import { tierFor } from '../../../shared/points.ts'
 import {
   deriveActivities,
   matchesPlayed,
@@ -355,13 +358,21 @@ domainRoutes.get('/bookings/:id', async (req, res) => {
 })
 
 /** awaitingPayment → confirmed. Menolak hold yang sudah lewat. */
+/**
+ * Membayar booking — lewat gerbang, bukan langsung dikonfirmasi.
+ *
+ * Dulu endpoint ini yang mengunci slot dan memberi poin. Itu berarti app
+ * menyatakan lunas tanpa ada uang yang berpindah ke mana pun. Sekarang ia
+ * hanya membuat tagihan; yang mengonfirmasi booking adalah webhook penyedia,
+ * setelah pembayarannya benar-benar masuk.
+ */
 domainRoutes.post('/bookings/:id/pay', async (req, res) => {
   const user = await requireUser(req, res)
   if (!user) return
 
   const booking = await store.getBooking(req.params.id, user.id)
   if (!booking) return fail(res, 404, 'NOT_FOUND', 'Booking tidak ditemukan.')
-  if (booking.status === 'confirmed') return res.json(booking)
+  if (booking.status === 'confirmed') return res.json({ booking, payment: null })
   if (booking.status !== 'awaitingPayment') {
     return fail(res, 409, 'STALE_DRAFT', 'Booking ini sudah tidak bisa dibayar.')
   }
@@ -370,13 +381,12 @@ domainRoutes.post('/bookings/:id/pay', async (req, res) => {
     return fail(res, 410, 'PAYMENT_EXPIRED', 'Waktu pembayaran habis. Slot dilepas kembali.')
   }
 
-  const hours = hoursOf(booking.range.startsAt, booking.range.hours)
-
   /*
-   * Slot diperiksa lagi tepat sebelum dikunci. Antara ringkasan dan
-   * pembayaran ada jeda, dan di server sungguhan jeda itu cukup untuk orang
-   * lain menyelesaikan booking di jam yang sama.
+   * Slot diperiksa sebelum tagihan dibuat. Menagih orang untuk jam yang sudah
+   * diambil orang lain berarti harus mengembalikan uangnya kemudian, dan
+   * pengembalian dana adalah hal yang paling baik dihindari sejak awal.
    */
+  const hours = hoursOf(booking.range.startsAt, booking.range.hours)
   const taken = await store.takenSlots(booking.courtId)
   const stolen = hours.filter((iso) => taken.has(iso))
   if (stolen.length > 0) {
@@ -392,38 +402,19 @@ domainRoutes.post('/bookings/:id/pay', async (req, res) => {
   }
 
   const { method } = req.body as { method: PaymentMethod }
-  const profile = await store.ensureProfile(user)
+  const account = await userForSession(bearer(req)!)
+  const payment = await createCharge(
+    { id: user.id, name: user.name, email: account?.email ?? null, phone: account?.phone ?? null },
+    {
+      kind: 'booking',
+      refId: booking.id,
+      amountIdr: booking.totalIdr,
+      description: `${booking.venueName} · ${booking.courtName}`,
+    },
+    method ?? 'qris',
+  )
 
-  await db.transaction(async (tx) => {
-    await store.claimSlots(booking.courtId, hours, booking.id, tx)
-    if (booking.recurrence) {
-      for (let w = 1; w < booking.recurrence.weeks; w += 1) {
-        await store.claimSlots(
-          booking.courtId,
-          hours.map((iso) => addWeeks(parseISO(iso), w).toISOString()),
-          booking.id,
-          tx,
-        )
-      }
-    }
-    await store.saveBooking(
-      user.id,
-      { ...booking, status: 'confirmed', paymentMethod: method, paymentDeadline: null },
-      tx,
-    )
-
-    // Poin yang ditukar baru benar-benar dipotong saat dibayar, bukan saat
-    // ringkasan dibuat: booking yang tidak jadi tidak boleh menghanguskan poin.
-    const delta = pointsEarned(booking.subtotalIdr) - booking.pointsRedeemed
-    const next = Math.max(0, profile.points + delta)
-    await tx.run('UPDATE profiles SET points = ?, tier = ? WHERE user_id = ?', [
-      next,
-      tierFor(next),
-      user.id,
-    ])
-  })
-
-  res.json(await store.getBooking(booking.id, user.id))
+  res.status(201).json({ booking, payment })
 })
 
 domainRoutes.post('/bookings/:id/split', async (req, res) => {
@@ -1008,12 +999,23 @@ domainRoutes.post('/merch/:id/order', async (req, res) => {
   await db.transaction(async (tx) => {
     await store.saveMerchItem(decrementStock(item, variant.id, quote.qty), tx)
     await store.saveMerchOrder(user.id, order, tx)
-    const next = Math.max(0, profile.points - quote.pointsSpent + quote.pointsEarned)
-    await tx.run('UPDATE profiles SET points = ?, tier = ? WHERE user_id = ?', [
-      next,
-      tierFor(next),
-      user.id,
-    ])
+    /*
+     * Hanya penebusan poin yang dipotong sekarang — tidak ada gerbang di
+     * baliknya, poinnya memang langsung berpindah.
+     *
+     * Poin belanja **tidak** diberikan di sini. Pesanan yang dibayar uang
+     * belum tentu jadi dibayar, dan memberi poin atas tagihan yang belum
+     * masuk berarti mencetak poin dari niat. Kreditnya menyusul di jalur
+     * penyelesaian pembayaran.
+     */
+    if (quote.pointsSpent > 0) {
+      const next = Math.max(0, profile.points - quote.pointsSpent)
+      await tx.run('UPDATE profiles SET points = ?, tier = ? WHERE user_id = ?', [
+        next,
+        tierFor(next),
+        user.id,
+      ])
+    }
   })
 
   res.status(201).json(order)
@@ -1208,6 +1210,228 @@ domainRoutes.patch('/complaints/:id/status', async (req, res) => {
   publish('complaint', complaint.id, 'status', { status }, user.id)
   res.json(await store.findComplaint(complaint.id))
 })
+
+/* ── Pembayaran ──────────────────────────────────────────────────────────── */
+
+/**
+ * Membuat tagihan.
+ *
+ * Klien menyebut **apa** yang mau dibayar; berapa besarnya dibaca dari
+ * catatan. Menerima angka dari klien berarti menerima tagihan seratus rupiah
+ * untuk lapangan dua ratus ribu.
+ */
+domainRoutes.post('/payments', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+
+  const { kind, refId, method } = req.body as {
+    kind: PaymentKind
+    refId: string
+    method: string
+  }
+  if (!['booking', 'merch', 'dues'].includes(kind) || !refId) {
+    return fail(res, 422, 'INVALID_BODY', 'Jenis dan acuan pembayaran wajib diisi.')
+  }
+
+  const target = await chargeTargetFor(kind, refId, user)
+  if ('error' in target) return fail(res, target.status, target.code, target.error)
+
+  const account = await userForSession(bearer(req)!)
+  const payment = await createCharge(
+    {
+      id: user.id,
+      name: user.name,
+      email: account?.email ?? null,
+      phone: account?.phone ?? null,
+    },
+    target,
+    method ?? 'qris',
+  )
+  res.status(201).json(payment)
+})
+
+type TargetOrError =
+  | { kind: PaymentKind; refId: string; amountIdr: number; description: string }
+  | { error: string; code: string; status: number }
+
+/** Jumlah tagihan, selalu dibaca dari catatan yang tersimpan. */
+async function chargeTargetFor(
+  kind: PaymentKind,
+  refId: string,
+  user: DomainUser,
+): Promise<TargetOrError> {
+  if (kind === 'booking') {
+    const booking = await store.getBooking(refId, user.id)
+    if (!booking) return { error: 'Booking tidak ditemukan.', code: 'NOT_FOUND', status: 404 }
+    if (booking.status === 'confirmed') {
+      return { error: 'Booking ini sudah dibayar.', code: 'ALREADY_PAID', status: 409 }
+    }
+    if (booking.status !== 'awaitingPayment') {
+      return { error: 'Booking ini sudah tidak bisa dibayar.', code: 'STALE_DRAFT', status: 409 }
+    }
+    return {
+      kind,
+      refId,
+      amountIdr: booking.totalIdr,
+      description: `${booking.venueName} · ${booking.courtName}`,
+    }
+  }
+
+  if (kind === 'merch') {
+    const found = await store.getMerchOrder(refId)
+    if (!found || found.userId !== user.id) {
+      return { error: 'Pesanan tidak ditemukan.', code: 'NOT_FOUND', status: 404 }
+    }
+    if (found.order.payMode === 'poin') {
+      // Penebusan poin tidak melewati gerbang pembayaran: tidak ada uang yang
+      // berpindah, dan poinnya sudah dipotong saat pesanan dibuat.
+      return {
+        error: 'Pesanan ini ditebus poin, bukan dibayar.',
+        code: 'POINTS_ORDER',
+        status: 409,
+      }
+    }
+    if (found.order.status !== 'menunggu') {
+      return { error: 'Pesanan ini sudah diproses.', code: 'ALREADY_PAID', status: 409 }
+    }
+    return {
+      kind,
+      refId,
+      amountIdr: found.order.totalIdr,
+      description: `${found.order.itemName} · ${found.order.variantLabel}`,
+    }
+  }
+
+  const invoice = await store.findDuesInvoice(refId)
+  if (!invoice || invoice.userId !== user.id) {
+    return { error: 'Tagihan iuran tidak ditemukan.', code: 'NOT_FOUND', status: 404 }
+  }
+  if (invoice.status === 'lunas') {
+    return { error: 'Tagihan ini sudah lunas.', code: 'ALREADY_PAID', status: 409 }
+  }
+  return {
+    kind,
+    refId,
+    amountIdr: invoice.amountIdr,
+    description: `Iuran keanggotaan ${invoice.period}`,
+  }
+}
+
+domainRoutes.get('/payments', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  res.json(await listPayments(user.id))
+})
+
+domainRoutes.get('/payments/:id', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const row = await findPayment(req.params.id)
+  if (!row || row.user_id !== user.id) {
+    return fail(res, 404, 'NOT_FOUND', 'Pembayaran tidak ditemukan.')
+  }
+  res.json(paymentView(row))
+})
+
+/** Aliran status satu pembayaran — supaya layar tidak perlu polling. */
+domainRoutes.get('/payments/:id/stream', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const row = await findPayment(req.params.id)
+  if (!row || row.user_id !== user.id) {
+    return fail(res, 404, 'NOT_FOUND', 'Pembayaran tidak ditemukan.')
+  }
+  openStream(res)
+  const stopHeartbeat = heartbeat(res)
+  const unsubscribe = subscribe('payment', row.id, user.id, res)
+  req.on('close', () => {
+    stopHeartbeat()
+    unsubscribe()
+  })
+})
+
+/**
+ * Simulator: menandai sebuah tagihan lunas.
+ *
+ * Hanya ada saat penyedia sungguhan belum dikonfigurasi, dan jalurnya tetap
+ * jalur produksi — ia merakit webhook bertanda tangan lalu mengirimkannya ke
+ * endpoint yang sama. Dengan begitu verifikasi tanda tangan ikut terjalani
+ * setiap hari, bukan jadi cabang kode yang baru pertama kali berjalan saat
+ * rilis.
+ */
+domainRoutes.post('/payments/:id/simulate', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  const provider = paymentProvider()
+  if (!(provider instanceof SimulatorProvider)) {
+    return fail(res, 404, 'NOT_FOUND', 'Simulator tidak aktif di server ini.')
+  }
+
+  const row = await findPayment(req.params.id)
+  if (!row || row.user_id !== user.id) {
+    return fail(res, 404, 'NOT_FOUND', 'Pembayaran tidak ditemukan.')
+  }
+
+  const status = (req.body as { status?: PaymentStatus }).status ?? 'settled'
+  const body = JSON.stringify({
+    paymentId: row.id,
+    reference: row.provider_ref ?? row.id,
+    status,
+    amountIdr: Number(row.amount_idr),
+    signature: provider.sign(row.id, status, Number(row.amount_idr)),
+  })
+
+  const event = provider.verifyWebhook(body, {})
+  if (!event) return fail(res, 500, 'SIGN_FAILED', 'Simulator gagal menandatangani webhook.')
+
+  const outcome = await applyWebhook(event)
+  if (!outcome.ok) return fail(res, 409, outcome.reason.toUpperCase(), 'Pembayaran ditolak.')
+  res.json(outcome.payment)
+})
+
+/* ── Iuran keanggotaan ───────────────────────────────────────────────────── */
+
+domainRoutes.get('/dues', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  await store.ensureProfile(user)
+  const settings = await store.getSettings()
+  res.json({
+    duesMonthlyIdr: settings.membership.duesMonthlyIdr,
+    memberDiscount: settings.membership.memberDiscount,
+    invoices: await store.listDuesInvoices(user.id),
+  })
+})
+
+/**
+ * Menerbitkan tagihan bulan berjalan.
+ *
+ * Idempoten lewat batasan unik `(user_id, period)`: menekan tombolnya dua
+ * kali tidak menghasilkan dua tagihan, dan itu dijaga basis data — bukan
+ * kehati-hatian pemanggil.
+ */
+domainRoutes.post('/dues/invoice', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+  await store.ensureProfile(user)
+
+  const settings = await store.getSettings()
+  if (settings.membership.duesMonthlyIdr <= 0) {
+    return fail(res, 409, 'NO_DUES', 'Klub ini belum menetapkan iuran keanggotaan.')
+  }
+
+  const invoice = await store.ensureDuesInvoice(
+    user.id,
+    (req.body as { period?: string }).period ?? currentPeriod(),
+    settings.membership.duesMonthlyIdr,
+  )
+  res.status(201).json(invoice)
+})
+
+/** Periode berjalan dalam bentuk YYYY-MM. */
+function currentPeriod(now = new Date()): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+}
 
 /* ── Dasbor admin ────────────────────────────────────────────────────────── */
 

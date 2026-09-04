@@ -23,6 +23,7 @@ import {
   normaliseEmail,
   normalisePhone,
   ownerOfIdentity,
+  mergeAuthData,
   publicUser,
   revokeAllSessions,
   revokeSession,
@@ -44,6 +45,7 @@ import {
 } from './oauth.ts'
 import { sendEmail, sendSms } from './senders.ts'
 import { db, type UserRow } from './db.ts'
+import { mergeDomainData, mergePreview } from './domain/store.ts'
 
 export const routes = Router()
 
@@ -661,6 +663,143 @@ routes.delete('/link/:method', async (req, res) => {
 
   const fresh = await syncRole((await findUserById(user.id))!)
   res.json(await linkState(fresh))
+})
+
+/* ── Menggabungkan dua akun yang terlanjur terpisah ──────────────────────── */
+
+/**
+ * Orang yang mendaftar lewat nomor lalu mendaftar lagi lewat email berakhir
+ * dengan dua akun, masing-masing membawa booking dan poinnya sendiri.
+ * Menyambungkan kontak tidak bisa menolongnya — kontaknya sudah dipakai akun
+ * lain — jadi jalannya adalah menggabungkan keduanya.
+ *
+ * Yang membuktikan kedua akun milik orang yang sama tetap sama seperti di
+ * mana pun: kode ke kontak itu. Tidak ada jalan pintas lewat "saya yakin ini
+ * akun saya".
+ */
+routes.post('/merge/request-otp', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+
+  const parsed = phoneSchema.safeParse(req.body)
+  if (!parsed.success) return fail(res, 422, 'INVALID_BODY', 'Nomor HP wajib diisi.')
+
+  const phone = normalisePhone(parsed.data.phone)
+  if (!phone) return fail(res, 422, 'INVALID_PHONE', 'Nomor HP tidak valid.')
+
+  const owner = await findUserByPhone(phone)
+  if (!owner) {
+    return fail(
+      res,
+      404,
+      'NO_SUCH_ACCOUNT',
+      'Tidak ada akun lain dengan nomor itu. Kalau nomornya memang belum dipakai, sambungkan saja lewat Atur cara masuk.',
+    )
+  }
+  if (owner.id === user.id) {
+    return fail(res, 409, 'SAME_ACCOUNT', 'Nomor itu sudah ada di akun ini.')
+  }
+
+  /*
+   * Slot diperiksa **sebelum** kode dikirim. Menemukan bahwa nomornya tidak
+   * punya tempat setelah orangnya membuka SMS dan mengetik enam angka adalah
+   * cara yang buruk untuk menyampaikan syarat yang sudah diketahui sejak awal.
+   */
+  if (user.phone) {
+    return fail(
+      res,
+      409,
+      'SLOT_TAKEN',
+      'Akun ini sudah punya nomor HP. Lepas dulu nomor lamanya di Atur cara masuk, baru gabungkan.',
+    )
+  }
+
+  const issued = await issueOtp(phone)
+  if (!issued.ok) {
+    return fail(
+      res,
+      429,
+      issued.reason === 'cooldown' ? 'COOLDOWN' : 'RATE_LIMIT',
+      issued.reason === 'cooldown'
+        ? `Tunggu ${issued.retryAfterSeconds} detik sebelum minta kode lagi.`
+        : 'Terlalu banyak permintaan kode. Coba lagi satu jam lagi.',
+      { retryAfterSeconds: issued.retryAfterSeconds },
+    )
+  }
+
+  const delivery = await sendSms(
+    phone,
+    `Kode untuk menggabungkan akun DBTC: ${issued.code}. Berlaku 5 menit. Jangan berikan ke siapa pun.`,
+  )
+
+  res.json({
+    phone,
+    expiresAt: issued.expiresAt,
+    delivery: delivery.channel,
+    /*
+     * Yang dilihat pemilik akun tujuan sebelum memutuskan: apa saja yang akan
+     * pindah. Menggabungkan akun tidak bisa dibatalkan, jadi angkanya
+     * ditunjukkan lebih dulu.
+     */
+    preview: await mergePreview(owner.id),
+    ...(config.isProduction ? {} : { devCode: issued.code }),
+  })
+})
+
+const mergeSchema = z.object({
+  phone: z.string().min(1),
+  code: z.string().regex(/^\d{6}$/, 'Kode terdiri dari 6 angka.'),
+})
+
+routes.post('/merge/confirm', async (req, res) => {
+  const user = await requireUser(req, res)
+  if (!user) return
+
+  const parsed = mergeSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return fail(res, 422, 'INVALID_BODY', parsed.error.issues[0]?.message ?? 'Data tidak valid.')
+  }
+
+  const phone = normalisePhone(parsed.data.phone)
+  if (!phone) return fail(res, 422, 'INVALID_PHONE', 'Nomor HP tidak valid.')
+
+  // Diperiksa ulang: keadaannya bisa berubah antara kode dikirim dan dijawab.
+  const owner = await findUserByPhone(phone)
+  if (!owner) return fail(res, 404, 'NO_SUCH_ACCOUNT', 'Akun dengan nomor itu sudah tidak ada.')
+  if (owner.id === user.id)
+    return fail(res, 409, 'SAME_ACCOUNT', 'Nomor itu sudah ada di akun ini.')
+  if (user.phone) {
+    return fail(res, 409, 'SLOT_TAKEN', 'Akun ini sudah punya nomor HP. Lepas dulu nomor lamanya.')
+  }
+
+  const check = await verifyOtp(phone, parsed.data.code)
+  if (!check.ok) {
+    return fail(
+      res,
+      check.reason === 'wrong' ? 422 : 410,
+      check.reason.toUpperCase(),
+      check.reason === 'wrong'
+        ? `Kode salah. Sisa ${check.attemptsLeft} percobaan.`
+        : 'Kode sudah tidak berlaku. Minta kode baru.',
+      { attemptsLeft: check.attemptsLeft },
+    )
+  }
+
+  /*
+   * Data domain dipindah lebih dulu, baru akunnya dihapus. Urutan sebaliknya
+   * akan menyisakan booking dan poin yang menunjuk user yang sudah tidak ada.
+   */
+  const domain = await mergeDomainData(owner.id, user.id)
+  const contacts = await mergeAuthData(owner.id, user.id)
+
+  const fresh = await syncRole((await findUserById(user.id))!)
+  res.json({
+    ok: true,
+    user: publicUser(fresh),
+    identities: await identitiesFor(fresh.id),
+    methods: await signInMethods(fresh),
+    merged: { ...domain, contacts },
+  })
 })
 
 /* ── Sesi ────────────────────────────────────────────────────────────────── */

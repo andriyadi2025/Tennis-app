@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AtSign, Plus, Smartphone, Unlink } from 'lucide-react'
+import { AtSign, Merge, Plus, Smartphone, Unlink } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { LinkState, SignInMethod } from '@/lib/authApi'
 import {
@@ -224,6 +224,23 @@ export function AccountLinkScreen() {
             </div>
           ),
         )}
+
+        {/* Menyambung menolak kontak milik akun lain — dan di situlah orang
+            perlu tahu ada jalan lain. */}
+        <Link
+          to="/akun/gabung"
+          className="flex min-h-touch items-center gap-3.5 rounded-lg bg-surface px-4 py-3.5"
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-pill bg-neutral-200 text-neutral-800">
+            <Icon icon={Merge} size={19} />
+          </span>
+          <span className="flex flex-1 flex-col">
+            <span className="text-md font-bold">Punya dua akun?</span>
+            <span className="text-sm text-neutral-700">
+              Gabungkan supaya booking dan poinnya jadi satu.
+            </span>
+          </span>
+        </Link>
 
         {methods.length === 4 && (
           <p className="text-base text-neutral-700">

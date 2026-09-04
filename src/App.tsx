@@ -8,6 +8,7 @@ import { usePreferencesStore } from '@/store/preferences'
 import { LoginScreen } from '@/routes/LoginScreen'
 import { ForgotPasswordScreen } from '@/routes/ForgotPasswordScreen'
 import { AccountLinkScreen } from '@/routes/AccountLinkScreen'
+import { AccountMergeScreen } from '@/routes/AccountMergeScreen'
 import { HomeScreen } from '@/routes/HomeScreen'
 import { SearchScreen } from '@/routes/SearchScreen'
 import { VenueDetailScreen } from '@/routes/VenueDetailScreen'
@@ -115,6 +116,7 @@ export function App() {
           <Route path="/sparring" element={<SparringScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/akun/cara-masuk" element={<AccountLinkScreen />} />
+          <Route path="/akun/gabung" element={<AccountMergeScreen />} />
 
           {/* Toko klub. Sengaja tidak jadi tab kelima: brief mematok empat
               tab, jadi pintu masuknya lewat Home dan Profil. */}

@@ -15,7 +15,7 @@ import type { Response } from 'express'
  * ikut terbaca pada pengambilan berikutnya.
  */
 
-export type ChannelKind = 'chat' | 'sparring' | 'complaint'
+export type ChannelKind = 'chat' | 'sparring' | 'complaint' | 'payment'
 
 interface Subscriber {
   id: number

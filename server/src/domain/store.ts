@@ -1422,3 +1422,238 @@ export async function countUpcomingBookings(courtId: string, sql: Sql = db): Pro
 }
 
 export { uid, now }
+
+/* ── Penggabungan akun ───────────────────────────────────────────────────── */
+
+export interface MergeReport {
+  /** Baris yang berpindah, per tabel — dipakai balasan dan tes. */
+  moved: Record<string, number>
+  /** Baris yang dibuang karena bentrok dengan milik akun tujuan. */
+  skipped: Record<string, number>
+  pointsAdded: number
+}
+
+/**
+ * Memindahkan seluruh data domain dari satu akun ke akun lain.
+ *
+ * Beberapa tabel punya batasan unik per user — satu pendaftaran per turnamen,
+ * satu keanggotaan per tim, satu kredit per kegiatan. Kalau kedua akun sudah
+ * punya barisnya, yang dari akun sumber **dibuang**, bukan dipaksa masuk:
+ * mendaftar dua kali di turnamen yang sama tidak menjadi dua kursi, dan
+ * mengkreditkan poin kegiatan yang sama dua kali adalah poin dari udara.
+ *
+ * Jumlah yang dibuang dilaporkan, bukan ditelan diam-diam.
+ */
+export async function mergeDomainData(
+  fromUserId: string,
+  toUserId: string,
+  sql: Sql = db,
+): Promise<MergeReport> {
+  const moved: Record<string, number> = {}
+  const skipped: Record<string, number> = {}
+
+  /** Tabel tanpa batasan unik per user: seluruh barisnya tinggal dipindah. */
+  const SIMPLE = ['bookings', 'merch_orders', 'complaints', 'notifications', 'reviews'] as const
+
+  /** Tabel dengan batasan unik: bentrok dibuang, sisanya dipindah. */
+  const UNIQUE: { table: string; other: string }[] = [
+    { table: 'registrations', other: 'tournament_id' },
+    { table: 'team_members', other: 'team_id' },
+    { table: 'open_match_players', other: 'match_id' },
+    { table: 'activity_awards', other: 'activity_id' },
+  ]
+
+  let pointsAdded = 0
+
+  await sql.transaction(async (tx) => {
+    for (const table of SIMPLE) {
+      const column = table === 'reviews' ? 'author_id' : 'user_id'
+      const { changes } = await tx.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [
+        toUserId,
+        fromUserId,
+      ])
+      moved[table] = changes
+    }
+
+    for (const { table, other } of UNIQUE) {
+      const bentrok = await tx.run(
+        `DELETE FROM ${table}
+         WHERE user_id = ?
+           AND ${other} IN (SELECT ${other} FROM ${table} WHERE user_id = ?)`,
+        [fromUserId, toUserId],
+      )
+      skipped[table] = bentrok.changes
+
+      const pindah = await tx.run(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`, [
+        toUserId,
+        fromUserId,
+      ])
+      moved[table] = pindah.changes
+    }
+
+    // Tim yang dibuat akun sumber ikut berpindah pemilik.
+    const teams = await tx.run('UPDATE teams SET owner_id = ? WHERE owner_id = ?', [
+      toUserId,
+      fromUserId,
+    ])
+    moved.teams = teams.changes
+
+    /*
+     * Poin dijumlahkan, bukan diambil yang terbesar: keduanya dikumpulkan
+     * orang yang sama, dan membuang salah satunya berarti menghanguskan
+     * belanja yang benar-benar terjadi.
+     */
+    const source = await tx.get<{ points: number; is_member: number; joined_at: string }>(
+      'SELECT points, is_member, joined_at FROM profiles WHERE user_id = ?',
+      [fromUserId],
+    )
+    if (source) {
+      const target = await tx.get<{ points: number; is_member: number; joined_at: string }>(
+        'SELECT points, is_member, joined_at FROM profiles WHERE user_id = ?',
+        [toUserId],
+      )
+      pointsAdded = Number(source.points)
+
+      if (!target) {
+        /*
+         * Akun tujuan belum pernah membuka profilnya, jadi barisnya belum ada.
+         * Baris sumber dipindahkan pemiliknya, bukan dipakai memperbarui baris
+         * yang tidak ada — UPDATE ke baris yang tidak ada mengenai nol baris,
+         * dan poinnya akan lenyap begitu baris sumber dihapus.
+         */
+        await tx.run('UPDATE profiles SET user_id = ? WHERE user_id = ?', [toUserId, fromUserId])
+        return
+      }
+
+      const total = Number(target.points) + pointsAdded
+      // Keanggotaan berbayar dipertahankan kalau salah satunya punya, dan
+      // tanggal gabung diambil yang paling awal — itu tanggal orangnya.
+      const member = Number(target.is_member) === 1 || Number(source.is_member) === 1
+      const joined = target.joined_at < source.joined_at ? target.joined_at : source.joined_at
+
+      await tx.run(
+        'UPDATE profiles SET points = ?, tier = ?, is_member = ?, joined_at = ? WHERE user_id = ?',
+        [total, tierFor(total), member ? 1 : 0, joined, toUserId],
+      )
+      await tx.run('DELETE FROM profiles WHERE user_id = ?', [fromUserId])
+    }
+  })
+
+  return { moved, skipped, pointsAdded }
+}
+
+/**
+ * Ringkasan apa yang akan pindah kalau sebuah akun digabungkan.
+ *
+ * Ditunjukkan sebelum orangnya memutuskan: penggabungan tidak bisa
+ * dibatalkan, dan "berapa booking yang ikut" adalah pertanyaan yang wajar
+ * ditanyakan lebih dulu — bukan setelahnya.
+ */
+export async function mergePreview(userId: string, sql: Sql = db) {
+  const count = async (table: string, column = 'user_id') => {
+    const row = await sql.get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM ${table} WHERE ${column} = ?`,
+      [userId],
+    )
+    return Number(row?.n ?? 0)
+  }
+  const profile = await sql.get<{ points: number }>(
+    'SELECT points FROM profiles WHERE user_id = ?',
+    [userId],
+  )
+  return {
+    bookings: await count('bookings'),
+    merchOrders: await count('merch_orders'),
+    complaints: await count('complaints'),
+    registrations: await count('registrations'),
+    teams: await count('team_members'),
+    points: Number(profile?.points ?? 0),
+  }
+}
+
+/* ── Iuran keanggotaan ───────────────────────────────────────────────────── */
+
+export interface DuesInvoice {
+  id: string
+  userId: string
+  /** YYYY-MM — mengurut sama secara teks dan kronologis. */
+  period: string
+  amountIdr: number
+  status: 'menunggu' | 'lunas'
+  dueAt: string
+  paidAt: string | null
+  createdAt: string
+}
+
+interface DuesRow {
+  id: string
+  user_id: string
+  period: string
+  amount_idr: number
+  status: string
+  due_at: string
+  paid_at: string | null
+  created_at: string
+}
+
+const toInvoice = (r: DuesRow): DuesInvoice => ({
+  id: r.id,
+  userId: r.user_id,
+  period: r.period,
+  amountIdr: Number(r.amount_idr),
+  status: r.status as DuesInvoice['status'],
+  dueAt: r.due_at,
+  paidAt: r.paid_at,
+  createdAt: r.created_at,
+})
+
+export async function listDuesInvoices(userId: string, sql: Sql = db): Promise<DuesInvoice[]> {
+  const rows = await sql.all<DuesRow>(
+    'SELECT * FROM dues_invoices WHERE user_id = ? ORDER BY period DESC',
+    [userId],
+  )
+  return rows.map(toInvoice)
+}
+
+export async function findDuesInvoice(id: string, sql: Sql = db): Promise<DuesInvoice | undefined> {
+  const row = await sql.get<DuesRow>('SELECT * FROM dues_invoices WHERE id = ?', [id])
+  return row ? toInvoice(row) : undefined
+}
+
+/**
+ * Menerbitkan tagihan satu periode, atau mengembalikan yang sudah ada.
+ *
+ * Batasan unik `(user_id, period)` yang menjaganya, bukan pemeriksaan
+ * sebelum menulis: dua permintaan yang datang bersamaan akan sama-sama lolos
+ * pemeriksaan dan sama-sama menulis, dan hanya basis data yang bisa menolak
+ * yang kedua.
+ */
+export async function ensureDuesInvoice(
+  userId: string,
+  period: string,
+  amountIdr: number,
+  sql: Sql = db,
+): Promise<DuesInvoice> {
+  const existing = await sql.get<DuesRow>(
+    'SELECT * FROM dues_invoices WHERE user_id = ? AND period = ?',
+    [userId, period],
+  )
+  if (existing) return toInvoice(existing)
+
+  // Jatuh tempo akhir bulan periode itu.
+  const [year, month] = period.split('-').map(Number)
+  const dueAt = new Date(Date.UTC(year!, month!, 0, 23, 59, 59)).toISOString()
+
+  await sql.run(
+    `INSERT INTO dues_invoices (id, user_id, period, amount_idr, status, due_at, paid_at, created_at)
+     VALUES (?, ?, ?, ?, 'menunggu', ?, NULL, ?)
+     ON CONFLICT (user_id, period) DO NOTHING`,
+    [uid('inv'), userId, period, Math.round(amountIdr), dueAt, now()],
+  )
+
+  const row = await sql.get<DuesRow>(
+    'SELECT * FROM dues_invoices WHERE user_id = ? AND period = ?',
+    [userId, period],
+  )
+  return toInvoice(row!)
+}

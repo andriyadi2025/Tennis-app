@@ -4,9 +4,10 @@ import clsx from 'clsx'
 import { QrCode } from 'lucide-react'
 import type { PaymentMethod } from '@/types'
 import { PAYMENT_LABEL } from '@/types'
-import { useAdjustPoints, useBooking, usePayBooking } from '@/hooks/queries'
+import type { Payment } from '@/hooks/queries'
+import { useBooking, usePayBooking } from '@/hooks/queries'
+import { PaymentPending } from '@/components/domain/PaymentPending'
 import { useDraftStore } from '@/store/draft'
-import { pointsEarned } from '@/lib/points'
 import { formatCountdown, formatDateShort, formatHourRange } from '@/lib/dates'
 import { formatIdr } from '@/lib/money'
 import { Screen, ScreenHeader, StickyBar } from '@/components/layout/Screen'
@@ -40,9 +41,9 @@ function useCountdown(deadlineIso: string | null): number {
 export function PaymentScreen() {
   const navigate = useNavigate()
   const draft = useDraftStore()
-  const adjustPoints = useAdjustPoints()
   const booking = useBooking(draft.bookingId ?? undefined)
   const pay = usePayBooking()
+  const [charge, setCharge] = useState<Payment | null>(null)
 
   const [method, setMethod] = useState<PaymentMethod>('qris')
   const remaining = useCountdown(booking.data?.paymentDeadline ?? draft.paymentDeadline)
@@ -59,22 +60,29 @@ export function PaymentScreen() {
   function onPay() {
     const id = draft.bookingId
     if (!id || !draft.canPay()) return
-    pay.mutate(
-      { id, method },
-      {
-        onSuccess: (confirmed) => {
-          draft.confirm()
-          // Poin yang ditukar berkurang, poin dari transaksi bertambah.
-          adjustPoints.mutate(
-            pointsEarned(confirmed.subtotalIdr - confirmed.discountIdr) - confirmed.pointsRedeemed,
-          )
-          navigate(`/booking/${confirmed.id}/ticket`, { replace: true })
-        },
-      },
-    )
+    /*
+     * Ini cuma membuat tagihan. Poin **tidak** disesuaikan di sini: server
+     * yang memberikannya saat pembayaran benar-benar masuk, dan menambahkannya
+     * juga dari klien berarti menghitungnya dua kali.
+     */
+    pay.mutate({ id, method }, { onSuccess: (result) => setCharge(result.payment) })
   }
 
   const data = booking.data
+
+  if (charge) {
+    return (
+      <PaymentPending
+        payment={charge}
+        title="Bayar booking"
+        onSettled={() => {
+          draft.confirm()
+          navigate(`/booking/${draft.bookingId}/ticket`, { replace: true })
+        }}
+        onCancel={() => setCharge(null)}
+      />
+    )
+  }
 
   return (
     <Screen

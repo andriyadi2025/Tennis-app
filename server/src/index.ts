@@ -2,6 +2,7 @@ import { createApp } from './app.ts'
 import { assertReady, config, providerStatus } from './config.ts'
 import { db, purgeExpired } from './db.ts'
 import { seedDomain } from './domain/store.ts'
+import { expireStalePayments } from './domain/payments.ts'
 
 /*
  * Kesiapan diperiksa sebelum port dibuka.
@@ -21,6 +22,14 @@ await seedDomain()
 setInterval(() => {
   void purgeExpired().catch((error) => console.error('[purge]', error))
 }, 10 * 60_000).unref()
+
+/*
+ * Tagihan yang ditinggalkan orangnya ditutup berkala. Tanpa ini, stok pesanan
+ * toko yang tidak jadi dibayar tidak pernah kembali ke katalog.
+ */
+setInterval(() => {
+  void expireStalePayments().catch((error) => console.error('[expire]', error))
+}, 60_000).unref()
 
 const server = createApp().listen(config.port, () => {
   const status = providerStatus()

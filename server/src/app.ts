@@ -3,6 +3,8 @@ import { config, providerStatus, readiness } from './config.ts'
 import { db } from './db.ts'
 import { routes } from './routes.ts'
 import { domainRoutes } from './domain/routes.ts'
+import { applyWebhook } from './domain/payments.ts'
+import { paymentProvider } from './payments/index.ts'
 
 /**
  * Pabrik app dipisah dari listener supaya tes bisa memakai app yang sama
@@ -10,6 +12,52 @@ import { domainRoutes } from './domain/routes.ts'
  */
 export function createApp() {
   const app = express()
+
+  /*
+   * Webhook dibaca sebagai teks mentah, bukan JSON yang sudah di-parse.
+   * Tanda tangannya dihitung atas byte yang benar-benar dikirim penyedia, dan
+   * JSON.parse lalu JSON.stringify tidak menghasilkan byte yang sama — urutan
+   * kunci dan spasi bisa berubah, dan tanda tangannya jadi tidak pernah cocok.
+   *
+   * Dipasang sebelum express.json supaya rute ini tidak keburu diambilnya.
+   */
+  app.post(
+    '/api/payments/webhook',
+    express.text({ type: '*/*', limit: '64kb' }),
+    async (req, res) => {
+      const raw = typeof req.body === 'string' ? req.body : ''
+      const headers: Record<string, string | undefined> = {}
+      for (const [key, value] of Object.entries(req.headers)) {
+        headers[key] = Array.isArray(value) ? value[0] : value
+      }
+
+      const event = paymentProvider().verifyWebhook(raw, headers)
+      /*
+       * Tanda tangan tidak cocok. Dijawab 401 tanpa keterangan: endpoint ini
+       * publik, dan menjelaskan bagian mana yang salah membantu orang yang
+       * sedang mencoba memalsukannya.
+       */
+      if (!event) {
+        res.status(401).json({ ok: false })
+        return
+      }
+
+      const outcome = await applyWebhook(event)
+      /*
+       * Penyedia mengirim ulang apa pun yang tidak dijawab 2xx. Untuk keadaan
+       * yang tidak akan berubah — pembayaran tidak dikenal, jumlah tidak cocok
+       * — 200 yang dikembalikan, supaya tidak dicoba selamanya. Yang tidak
+       * beres tetap tercatat di log.
+       */
+      if (!outcome.ok) {
+        console.warn('[webhook ditolak]', outcome.reason, event.paymentId)
+        res.json({ ok: false, reason: outcome.reason })
+        return
+      }
+      res.json({ ok: true, status: outcome.payment.status })
+    },
+  )
+
   app.use(express.json({ limit: '64kb' }))
 
   /*

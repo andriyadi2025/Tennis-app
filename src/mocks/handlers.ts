@@ -551,7 +551,7 @@ export const handlers = [
     if (!booking) return HttpResponse.json({ message: 'Booking tidak ditemukan.' }, { status: 404 })
 
     if (booking.status === 'confirmed') {
-      return HttpResponse.json(booking)
+      return HttpResponse.json({ booking, payment: null })
     }
     if (booking.status !== 'awaitingPayment') {
       return HttpResponse.json(
@@ -594,15 +594,46 @@ export const handlers = [
         )
       }
     }
-    const confirmed: Booking = {
-      ...booking,
-      status: 'confirmed',
-      paymentMethod: body.method,
-      paymentDeadline: null,
+    /*
+     * Bentuknya mengikuti server sungguhan: menekan Bayar membuat tagihan,
+     * bukan mengonfirmasi booking. Kalau tiruan ini mengembalikan bentuk lama,
+     * tes komponen akan lulus atas kontrak yang sudah tidak ada.
+     */
+    const payment = {
+      id: `pay-${Date.now().toString(36)}`,
+      kind: 'booking' as const,
+      refId: booking.id,
+      amountIdr: booking.totalIdr,
+      method: body.method,
+      status: 'pending' as const,
+      provider: 'simulator',
+      redirectUrl: null,
+      qrString: `SIMULASI-DBTC|${booking.id}|${booking.totalIdr}`,
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      settledAt: null,
+      createdAt: new Date().toISOString(),
     }
-    saveBooking(confirmed)
+    saveBooking({ ...booking, paymentMethod: body.method })
     persistDb()
-    return HttpResponse.json(confirmed)
+    return HttpResponse.json({ booking, payment }, { status: 201 })
+  }),
+
+  http.get('/api/payments/:id', async ({ params }) => {
+    await latency()
+    return HttpResponse.json({
+      id: String(params.id),
+      kind: 'booking',
+      refId: 'bk-seed-1',
+      amountIdr: 0,
+      method: 'qris',
+      status: 'pending',
+      provider: 'simulator',
+      redirectUrl: null,
+      qrString: 'SIMULASI-DBTC',
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      settledAt: null,
+      createdAt: new Date().toISOString(),
+    })
   }),
 
   http.post('/api/bookings/:id/split', async ({ params, request }) => {
