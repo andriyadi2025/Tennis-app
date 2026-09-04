@@ -50,7 +50,12 @@ export function ComplaintRow({
 
       {last && (
         <p className="line-clamp-2 text-base text-neutral-700">
-          <span className="font-semibold">{last.authorRole === 'admin' ? 'Klub: ' : 'Kamu: '}</span>
+          {/* "Kamu" hanya benar di daftar milik sendiri. Di dasbor admin,
+              pesan anggota ditulis orang lain — menyebutnya "Kamu" membuat
+              pengurus mengira ia sendiri yang menulisnya. */}
+          <span className="font-semibold">
+            {last.authorRole === 'admin' ? 'Klub: ' : showAuthor ? 'Anggota: ' : 'Kamu: '}
+          </span>
           {last.body}
         </p>
       )}
