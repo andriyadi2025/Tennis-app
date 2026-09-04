@@ -10,12 +10,24 @@ Android, jalan tanpa server — seluruh backend disimulasikan MSW.
 > app ini memang hanya untuk satu klub tenis, layar pencarian venue dan
 > pemilih cabang adalah bagian pertama yang layak dipertimbangkan ulang.
 
+App ini punya **dua bagian**: frontend Vite, dan server autentikasi sungguhan
+di `server/`. Jalankan keduanya:
+
 ```bash
-npm install
+npm install && npm --prefix server install
+```
+
+```bash
+npm run server
+```
+
+```bash
 npm run dev
 ```
 
-Buka URL yang dicetak Vite, lalu tekan **Masuk dengan akun demo**.
+Buka URL yang dicetak Vite. Tanpa kredensial penyedia apa pun, alur masuk lewat
+nomor HP dan email tetap bisa diselesaikan — kodenya ditampilkan di layar
+(hanya di luar produksi).
 
 ---
 
@@ -31,6 +43,64 @@ Buka URL yang dicetak Vite, lalu tekan **Masuk dengan akun demo**.
 | `npm run format`     | Prettier                                           |
 
 ---
+
+## Autentikasi
+
+Auth **sudah nyata**: server Express + SQLite di `server/`, dengan sesi yang
+bisa dicabut, sandi ter-hash, OTP berbatas, dan OAuth 2.0. Sisa endpoint
+(venue, booking, turnamen) **masih dilayani MSW** di dalam browser. Migrasi
+bertahap, dan proxy `/api/auth` di `vite.config.ts` yang menandai batasnya.
+
+| Metode             | Keadaan                                                   |
+| ------------------ | --------------------------------------------------------- |
+| Nomor HP + OTP     | Jalan penuh. Tanpa Twilio, kode dicetak ke log server.    |
+| Email + kata sandi | Jalan penuh, termasuk verifikasi email.                   |
+| Google             | Alur OAuth lengkap; menunggu `GOOGLE_CLIENT_ID/SECRET`.   |
+| Facebook           | Alur OAuth lengkap; menunggu `FACEBOOK_CLIENT_ID/SECRET`. |
+
+Yang tidak dikonfigurasi **melaporkan dirinya belum siap** — tombolnya
+dinonaktifkan dengan alasan, dan endpoint-nya membalas 501 yang menyebut
+variabel mana yang perlu diisi. Tidak ada yang berpura-pura berhasil.
+
+### Keputusan yang layak diperiksa
+
+- **Sesi opaque, bukan JWT.** Token acak 32 byte; yang disimpan hanya HMAC-nya.
+  Database yang bocor tidak langsung memberi sesi yang bisa dipakai, dan sesi
+  bisa dicabut seketika — hal yang tidak bisa dilakukan JWT sebelum kedaluwarsa.
+- **Kode OTP di-hash**, bersama nomornya. Yang bisa membaca database tetap
+  tidak bisa membaca kode yang sedang berlaku.
+- **scrypt dari pustaka standar** untuk sandi. Memory-hard, dan satu dependensi
+  lebih sedikit.
+- **Pesan gagal masuk selalu sama** untuk email tak terdaftar dan sandi salah.
+  Membedakannya akan membocorkan alamat mana yang punya akun.
+- **Nomor dinormalkan ke E.164** sebelum apa pun, jadi `08…`, `62…`, dan
+  `+62…` bukan tiga akun berbeda — dan normalisasi itu ikut sampai ke rate
+  limiter, bukan berhenti di validasi.
+- **PKCE S256** untuk Google, dengan `state` disimpan di server, sekali pakai.
+- **Peran admin diturunkan dari `ADMIN_CONTACTS`**, bukan disimpan sekali lalu
+  dilupakan. Tanpa ini tidak ada jalan menjadi admin sama sekali.
+
+Rem yang dipasang: OTP kedaluwarsa 5 menit, maksimal 5 tebakan lalu kodenya
+hangus, jeda kirim ulang 60 detik, dan maksimal 5 kode per nomor per jam.
+Semuanya ditegakkan di server — tombol yang di-disable di UI bukan pengaman.
+
+### Menyalakan penyedia sungguhan
+
+Salin `server/.env.example` jadi `server/.env`, lalu isi yang dibutuhkan.
+Semua kredensial berhenti di proses server; tidak ada satu pun yang sampai ke
+browser.
+
+| Variabel                    | Untuk                                                    |
+| --------------------------- | -------------------------------------------------------- |
+| `ADMIN_CONTACTS`            | Nomor/email pengurus, dipisah koma — jadi admin otomatis |
+| `TOKEN_PEPPER`              | **Wajib diganti di produksi**; mem-hash token sesi & OTP |
+| `GOOGLE_CLIENT_ID/SECRET`   | Masuk dengan Google                                      |
+| `FACEBOOK_CLIENT_ID/SECRET` | Masuk dengan Facebook                                    |
+| `TWILIO_*`                  | Pengiriman OTP lewat SMS                                 |
+| `SMTP_*`                    | Pengiriman email verifikasi                              |
+
+Redirect URI yang perlu didaftarkan di Google/Meta:
+`http://localhost:5173/api/auth/oauth/<google|facebook>/callback`
 
 ## Arsitektur
 
@@ -235,7 +305,12 @@ State error di app ini nyata, bukan hiasan. Cara memancingnya:
 
 ## Tes
 
-`npm test` — 168 tes, 19 berkas.
+`npm run verify:all` menjalankan keduanya — **211 tes**: 168 frontend
+(19 berkas) dan 43 server (2 berkas).
+
+Tes server menembak app Express yang sama dengan yang dijalankan produksi,
+lewat HTTP sungguhan — jadi yang diuji bukan cuma logikanya tapi juga
+perkabelannya: rute, kode status, dan bentuk balasan.
 
 **Unit (`src/lib/*.test.ts`)** — perhitungan harga, penukaran poin dan batas
 30%, pembulatan split bill (termasuk pembuktian bahwa jumlah seluruh bagian
@@ -346,6 +421,12 @@ punya keadaan memuat (skeleton, bukan spinner), kosong, dan gagal.
 - **Pembayaran.** Tidak ada gateway. Menekan Bayar langsung mengonfirmasi;
   QRIS/VA/kartu hanya pilihan, tidak menghasilkan kode bayar sungguhan.
 - **Foto venue.** Blok warna beraksen, bukan foto.
+- **Verifikasi nomor HP lewat SMS sungguhan** menunggu akun Twilio; alurnya
+  sudah lengkap, hanya salurannya yang masih log server.
+- **Lupa kata sandi** belum ada. Tabel dan tipenya sudah menyiapkan tujuan
+  `reset`, tapi layar dan endpoint-nya belum dibuat.
+- **Menautkan akun** sesudah masuk (mis. menambah Google ke akun yang sudah
+  ada) belum ada; penautan hanya terjadi otomatis saat emailnya cocok.
 - **Notifikasi push** tidak ada, dan sengaja tidak dipalsukan: push sungguhan
   butuh service worker dengan kunci VAPID dan server yang mengirim — tanpa itu
   yang bisa dibuat hanyalah tiruan yang menyesatkan. Yang ada: daftar notifikasi

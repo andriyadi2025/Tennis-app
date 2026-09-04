@@ -13,7 +13,10 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run lint && npm run typecheck && npm run test"
+    "verify": "npm run lint && npm run typecheck && npm run test",
+    "server": "npm --prefix server run dev",
+    "verify:server": "npm --prefix server run verify",
+    "verify:all": "npm run verify && npm run verify:server"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.4",
